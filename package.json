@@ -1,6 +1,6 @@
 {
   "name": "membermanager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MemberManager - the member list FormTracker and SendNewsletters read: people, households and organizations, the newsletters they get, and the office's own fields",
   "main": "main.js",
   "author": "Anabaptist Brotherhood",
