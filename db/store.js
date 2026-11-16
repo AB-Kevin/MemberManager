@@ -369,6 +369,7 @@ const LOCAL_SETTINGS = new Set([
   "fundTrackFolder",
   "fundTrackChoices",
   "cardPrinter",
+  "cardDpi",
 ]);
 
 const localSettingsPath = () => path.join(localDir, "local-settings.json");

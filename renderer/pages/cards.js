@@ -20,6 +20,7 @@ window.Pages.cards = {
     let previewRef = null;
     let preview = { name: "", values: {} };
     let scale = 7; // px per mm on screen
+    let cardDpiSetting = 300;
     let size = { w: 85.6, h: 53.98 };
 
     container.innerHTML = `
@@ -58,6 +59,7 @@ window.Pages.cards = {
       design = got.design;
       images = got.images;
       fonts = got.fonts;
+      cardDpiSetting = got.dpi;
       size = got.size;
       window.__cardDesign = id;
       fieldChoices = await window.api.cardFields(design.cardFor);
@@ -144,6 +146,13 @@ window.Pages.cards = {
               <button class="btn secondary" type="button" id="card-pdf">Preview as PDF</button>
               <button class="btn secondary" type="button" id="card-test">Print a test card</button>
               <label class="lists-inline">Card printer <select id="card-printer"><option value="">Ask each time</option></select></label>
+              <label class="lists-inline" title="What MemberManager asks the printer for. The SMART-51 prints colour at 300 dpi, and black at up to 1200 dpi with a black resin (K) ribbon panel.">Print resolution
+                <select id="card-dpi">
+                  <option value="300">300 dpi (colour)</option>
+                  <option value="600">600 dpi (black resin)</option>
+                  <option value="1200">1200 dpi (black resin)</option>
+                  <option value="0">The printer's default</option>
+                </select></label>
             </div>
             <p class="hint">Preview as PDF shows the card with its template image, to check where everything lands without using a card. The test card is the person shown,
               on the side shown. Print cards for a list on the Lists page, or for one member from their card on Find.</p>
@@ -371,6 +380,8 @@ window.Pages.cards = {
         });
       }
       qs("#card-printer", body).addEventListener("change", (e) => window.api.setCardPrinter(e.target.value));
+      qs("#card-dpi", body).value = String(cardDpiSetting);
+      qs("#card-dpi", body).addEventListener("change", async (e) => (cardDpiSetting = await window.api.setCardDpi(Number(e.target.value))));
       qs("#card-add", body).addEventListener("click", () => addElement("field", qs("#card-add-field", body).value));
       qs("#card-add-text", body).addEventListener("click", () => addElement("text"));
       const job = (pdf) => async () => {

@@ -1386,6 +1386,7 @@ ipcMain.handle("cards:get", async (event, id) => {
     size: cards.cardSize(design.orientation),
     fonts: cards.FONTS.map((family) => ({ family, note: cards.BUNDLED_FONTS.find((f) => f.family === family)?.note || "" })),
     printer: store.getSettings().cardPrinter || "",
+    dpi: cardDpi(),
   };
 });
 
@@ -1474,6 +1475,19 @@ ipcMain.handle("cards:printers", async () => {
   return printers.map((p) => p.name).sort();
 });
 
+// The resolution card jobs ask for: 300 dpi (the SMART-51's colour) unless
+// set to 600 or 1200 (its black resin panel) or 0, the printer's default.
+const CARD_DPI = [300, 600, 1200, 0];
+const cardDpi = () => {
+  const saved = store.getSettings().cardDpi;
+  return CARD_DPI.includes(saved) ? saved : 300;
+};
+
+ipcMain.handle("cards:set-dpi", async (event, dpi) => {
+  store.updateSettings({ cardDpi: CARD_DPI.includes(Number(dpi)) ? Number(dpi) : 300 });
+  return cardDpi();
+});
+
 ipcMain.handle("cards:set-printer", async (event, name) => {
   store.updateSettings({ cardPrinter: String(name || "") });
   return true;
@@ -1519,10 +1533,15 @@ ipcMain.handle("cards:print", async (event, { designId, side, refs, listState, p
     }
     const { w, h } = cards.cardSize(design.orientation);
     const printer = store.getSettings().cardPrinter || "";
+    // Asked for outright: some Windows drivers tell Chromium a resolution of
+    // 0 or less, and it then falls back to a low default, which prints soft
+    // text. 0 here means the printer's own default.
+    const dpi = cardDpi();
     const printed = await new Promise((resolve, reject) =>
       win.webContents.print(
         {
           silent: !!printer,
+          ...(dpi ? { dpi: { horizontal: dpi, vertical: dpi } } : {}),
           deviceName: printer || undefined,
           printBackground: true,
           margins: { marginType: "none" },

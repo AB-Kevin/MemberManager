@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld("api", {
   cardValues: (id, side, ref) => invoke("cards:values", id, side, ref),
   cardPrinters: () => invoke("cards:printers"),
   setCardPrinter: (name) => invoke("cards:set-printer", name),
+  setCardDpi: (dpi) => invoke("cards:set-dpi", dpi),
   printCards: (job) => invoke("cards:print", job),
 
   getSettings: () => invoke("settings:get"),
