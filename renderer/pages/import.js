@@ -41,6 +41,7 @@ window.Pages.import = {
     const gf = await window.api.getGfSettings();
     const signupReady = !!(gf.siteUrl && gf.formId);
     const others = await window.api.migrationSources().catch(() => ({}));
+    let fundTrackInfo = await window.api.fundTrackStatus().catch(() => null);
     const initialMode = window.__importMode === "org" ? "org" : "person";
     window.__importMode = null;
     let source = null; // { kind: "file", filePath }, { kind: "signup", includeImported } or { kind: "formtracker", folder }
@@ -55,6 +56,7 @@ window.Pages.import = {
       <p class="subtitle">Bring in a CSV or Excel file (the membership software's export, say), the signups from the website's signup form, or FormTracker's contacts.
         People already on the list are updated instead of added twice, and anyone who might be a duplicate is flagged on the Duplicates page.
         Any column can go into one of your fields, or become a new one. <a href="#" id="back-link">Back to the member list</a></p>
+      <div class="panel fundtrack-panel" id="fundtrack-panel"></div>
       <div class="import-sources">
         <div class="panel">
           <h2 style="margin-top:0">A spreadsheet</h2>
@@ -86,6 +88,143 @@ window.Pages.import = {
       <p id="source-name" class="hint"></p>
       <div id="mapping-area"></div>
     `;
+
+    // ---- FundTrack's exports ----
+    // A set import rather than one to map: households through the membership
+    // export's set-up, then everyone in them, then the churches (main.js,
+    // "FundTrack's exports").
+    const shortDate = (iso) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString() : "");
+    function renderFundTrack() {
+      const panel = qs("#fundtrack-panel", container);
+      const info = fundTrackInfo;
+      const found = info?.found || {};
+      const names = { groups: "MemberGroups", individuals: "MemberIndividuals", orgs: "MemberOrganizations", contacts: "MemberOrganizationContacts", addresses: "MemberOrganizationAddresses" };
+      const dated = (f) => `${shortDate(f.date)}${f.dateFrom === "saved" ? ", when it was saved" : ""}`;
+      // Each table's file: the newest (by the date in its name, or when it
+      // was saved), or one chosen here. Any name works -- files are told
+      // apart by their columns.
+      const fileChoice = (key, name) => {
+        const mine = (info.files || []).filter((f) => f.table === key);
+        const needed = key === "groups" || key === "individuals";
+        if (!mine.length) return `<tr><th>${name}</th><td class="hint">No file with its columns${needed ? " — needed" : ""}</td></tr>`;
+        const auto = found[key] && !found[key].chosen ? found[key] : [...mine].sort((a, b) => b.date.localeCompare(a.date))[0];
+        return `<tr><th>${name}</th><td><select data-ft-table="${key}" aria-label="${name} file">
+          <option value="" ${found[key]?.chosen ? "" : "selected"}>Newest: ${escapeHtml(auto.file)} (${dated(auto)})</option>
+          ${mine.map((f) => `<option value="${escapeHtml(f.file)}" ${found[key]?.chosen && found[key].file === f.file ? "selected" : ""}>${escapeHtml(f.file)} (${dated(f)})</option>`).join("")}
+        </select></td></tr>`;
+      };
+      const ready = found.groups && found.individuals;
+      panel.innerHTML = `
+        <h2 style="margin-top:0">FundTrack's exports</h2>
+        <p class="hint" style="margin-top:0">Everyone in every household on every plan, with birth dates, roles and phone numbers, and the churches' codes and contacts —
+          for finding anyone on the Find, Lists and Near ZIP pages. Households already on the list are matched by Member ID and updated; new ones on the
+          Medical Aid &amp; Alms Plan get Our Health by mail, as with the membership export. Identity, health and case columns are never brought in.</p>
+        ${
+          info?.folder
+            ? `<p>From <code>${escapeHtml(info.folder)}</code> <button class="btn secondary" id="ft-pick" type="button">Choose another folder…</button></p>
+               ${
+                 info.insideAbApps
+                   ? `<p class="shared-note" style="border-color:var(--warn)"><strong>This folder is inside the AB Apps folder</strong>, so everyone it's shared with can open these files —
+                      and FundTrack's exports have Social Security digits and health and case details that MemberManager never keeps. Keep them somewhere only the office's
+                      managers can open, such as "AB Files - 07 Archive\exports", and choose that folder instead.</p>`
+                   : ""
+               }
+               <table class="ft-files">${Object.entries(names).map(([key, name]) => fileChoice(key, name)).join("")}</table>
+               ${info.unknown?.length ? `<p class="hint">Not recognized (no FundTrack table's columns): ${info.unknown.map(escapeHtml).join(", ")}</p>` : ""}
+               ${info.ignored?.length ? `<p class="hint">Copies, used only if chosen above: ${info.ignored.map(escapeHtml).join(", ")}</p>` : ""}
+               ${info.lastImport ? `<p class="hint">Last brought in ${escapeHtml(formatDate(info.lastImport.at))} by ${escapeHtml(info.lastImport.by || "someone")}, from exports dated ${shortDate(info.lastImport.dated)}.</p>` : ""}
+               ${
+                 info.fieldsToAdd?.length
+                   ? `<p class="hint">These fields are added the first time: ${info.fieldsToAdd.map((f) => `${escapeHtml(f.label)} (${escapeHtml(Fields.levelLabel(f.appliesTo).toLowerCase())})`).join(", ")}.</p>`
+                   : ""
+               }
+               <div class="row"><button class="btn" id="ft-check" type="button" ${ready ? "" : "disabled"}>Check what it would do</button></div>
+               <div id="ft-preview"></div>`
+            : `<p class="hint">Choose the folder FundTrack's exports are saved in (usually "AB Files - 07 Archive\exports"). The files can be named anything; they're recognized by their columns.</p>
+               <div class="row"><button class="btn" id="ft-pick" type="button">Choose folder…</button></div>`
+        }`;
+      qsa("[data-ft-table]", panel).forEach((select) =>
+        select.addEventListener("change", async () => {
+          try {
+            fundTrackInfo = await window.api.chooseFundTrackFile(select.dataset.ftTable, select.value || null);
+            renderFundTrack();
+          } catch (err) {
+            toast(err.message, true);
+            renderFundTrack();
+          }
+        })
+      );
+      qs("#ft-pick", panel)?.addEventListener("click", async () => {
+        try {
+          const picked = await window.api.pickFundTrackFolder();
+          if (picked) {
+            fundTrackInfo = picked;
+            renderFundTrack();
+          }
+        } catch (err) {
+          toast(err.message, true);
+        }
+      });
+      qs("#ft-check", panel)?.addEventListener("click", async (e) => {
+        const btn = e.target;
+        btn.disabled = true;
+        btn.textContent = "Checking…";
+        try {
+          renderFundTrackPreview(await window.api.previewFundTrack());
+        } catch (err) {
+          toast(err.message, true);
+        }
+        btn.disabled = false;
+        btn.textContent = "Check again";
+      });
+    }
+
+    function renderFundTrackPreview(p) {
+      const area = qs("#ft-preview", container);
+      const h = p.householdStats;
+      area.innerHTML = `
+        <div class="stat-row" style="margin-top:12px">
+          <div class="stat-card"><div class="num">${p.households.toLocaleString()}</div><div class="label">Households</div></div>
+          <div class="stat-card"><div class="num">${p.people.toLocaleString()}</div><div class="label">People</div></div>
+          <div class="stat-card"><div class="num">${p.churches.toLocaleString()}</div><div class="label">Churches</div></div>
+        </div>
+        <p class="hint">Households: ${h.added.toLocaleString()} new, ${h.updated.toLocaleString()} updated, ${h.unchanged.toLocaleString()} already up to date${
+          h.inactiveStopped ? `; ${plural(h.inactiveStopped, "member")} now inactive stop getting newsletters` : ""
+        }${h.ambiguous ? `; ${plural(h.ambiguous, "row")} could be more than one person on the list, and are left out` : ""}${
+          p.householdsWithoutMemberId ? `; ${plural(p.householdsWithoutMemberId, "household")} with no Member ID (GroupCode) in FundTrack ${p.householdsWithoutMemberId === 1 ? "is" : "are"} left out` : ""
+        }.</p>
+        <p class="hint">People: ${p.peopleLinked ? `${p.peopleLinked.toLocaleString()} already linked to FundTrack; ` : ""}the rest are matched by name within their household, or added.${
+          p.peopleWithoutHousehold
+            ? ` ${plural(p.peopleWithoutHousehold, "person is", "people are")} in a household that isn't in the MemberGroups export, so ${p.peopleWithoutHousehold === 1 ? "is" : "are"} left out.`
+            : ""
+        }</p>
+        ${
+          p.mixedDates?.length
+            ? `<p class="hint" style="color:var(--warn)">The exports are from different days (${p.mixedDates.map((d) => `${escapeHtml(d.table)} ${shortDate(d.date)}`).join(", ")}),
+                so a few people or households may not line up. Export every table on the same day for the best match.</p>`
+            : ""
+        }
+        <p class="hint">Plans: ${p.plans.map((x) => `${escapeHtml(x.name)} (${x.count.toLocaleString()})`).join(", ")}.</p>
+        <div class="row"><button class="btn" id="ft-commit" type="button">Bring it in</button></div>`;
+      qs("#ft-commit", area).addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = "Bringing it in…";
+        try {
+          const r = await window.api.commitFundTrack();
+          toast(
+            `Brought in FundTrack's exports: ${r.households.added.toLocaleString()} new households, ${r.people.added.toLocaleString()} new people ` +
+              `(${r.people.updated.toLocaleString()} updated), ${r.churches.added.toLocaleString()} new churches.` +
+              (r.people.noHousehold ? ` ${plural(r.people.noHousehold, "person", "people")} whose household couldn't be matched were left out.` : "")
+          );
+          navigate("find");
+        } catch (err) {
+          toast(`Import failed: ${err.message}`, true);
+          e.target.disabled = false;
+          e.target.textContent = "Bring it in";
+        }
+      });
+    }
+    renderFundTrack();
 
     qs("#back-link", container).addEventListener("click", (e) => {
       e.preventDefault();

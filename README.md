@@ -2,13 +2,46 @@
 
 A desktop app that keeps the office's member list in one place: everyone the office keeps in touch with, their households and churches, which newsletters they get, and any fields the office adds. FormTracker and SendNewsletters read their contacts from it, so a person is updated once rather than in each app: SendNewsletters its whole mailing list, FormTracker every member (anyone with a Member ID) with this app's fields as its extra columns. Both pick up a save within seconds, while their host computer's app is open.
 
+- **Find**: anyone, quickly, by name, phone, email, birth date, Member ID, church, city or ZIP, with a card for each household, person and church.
 - **Members**: two editable spreadsheets, **People** and **Organizations**. Edits save as you go, and Ctrl+Z undoes them.
+- **Lists**: any list of people, households or churches, on any field and any conditions, to save as a spreadsheet, print, or keep for next time.
+- **Near ZIP**: how many members live within 10 to 100 miles of a ZIP code. Counts only, so it can be shared.
 - **Fields**: the office's own fields, such as Committee, Over 65, Joined or District, for each person, each household or each organization. Add one in a few seconds from **Add field…** on the Members page, or from the **Fields** page.
-- **Import**: a spreadsheet (the membership software's export, say), new signups from the website's Gravity Forms signup form, or FormTracker's contacts. Any column can go into a field, or become a new one.
+- **Import**: FundTrack's weekly exports (everyone in every household), a spreadsheet, new signups from the website's Gravity Forms signup form, or FormTracker's contacts. Any spreadsheet column can go into a field, or become a new one.
 - **Duplicates**: people, households and churches that might be the same, to merge or keep apart.
 - **Newsletters…**: the newsletters and magazines, and who gets each by email or by mail.
 
-It grew out of SendNewsletters' mailing list and works the same way, so anyone who has used that list already knows this one.
+It grew out of SendNewsletters' mailing list and works the same way, so anyone who has used that list already knows this one. Find, Lists and Near ZIP do what the office's Member Finder does, apart from its billing pages (contribution invoices, medical bills and overdue accounts), which MemberManager leaves to FundTrack: it never keeps claims or health information.
+
+## FundTrack's exports
+
+**Import → FundTrack's exports** brings in the whole membership from FundTrack's exports (File → Data View → a table → Export, saved as `<Table> MMDDYYYY.csv`): `MemberGroups` and `MemberIndividuals` are needed, and `MemberOrginizations`, `MemberOrganizationContacts` and `MemberOrginizationAddresses` add the churches. It finds the folder by itself when it's the archive library's `exports` folder beside the AB Apps folder's library; otherwise choose it once. The newest export of each table is used, and copies ("… - Copy.csv") are left alone. **Check what it would do** shows the counts first. Run it again whenever there are newer exports: it updates everyone in place.
+
+- **Households** come in as the membership export always has (heads matched by Member ID; new ones on the Medical Aid & Alms Plan get Our Health by mail), now for every plan and including inactive households, which get no newsletters. A household with no Member ID (GroupCode) in FundTrack is left out, since it couldn't be found again next time.
+- **Everyone in each household** joins it, with **Birth date**, **Role** and **Gender**. Only the head has the Member ID, so FormTracker still gets one contact per household. The first time, people already on the list are matched by name within their household; after that, by their FundTrack id. Names already on the list aren't changed.
+- **A household is a member's account.** Two accounts can share a mailing address (a married son's family on his parents' farm), which still gets one bundle of each newsletter. So an account's **Phone**, **Plan** and **Household type** are fields of its head, and Find, Lists and Near ZIP show FundTrack's accounts as households.
+- **Churches** get **Code**, **Denomination**, **Organization type** and **Phone**, their contacts, and an Attention line, email and address where those are blank. A church FundTrack has twice is used once.
+- These are ordinary fields, made the first time on the Fields page. Renaming one is fine; it's then treated like any other field.
+- FundTrack's other columns are kept as **FundTrack details**, shown on Find's cards and offered on Lists. Identity, health and case columns (Social Security, pre-existing conditions, case IDs and the like) and FundTrack's own bookkeeping are never kept (`lib/fundTrack.js`, `lib/sensitiveColumns.js`).
+- Exports saved on different days don't quite line up, and the preview says so. Export every table on the same day.
+
+## Find
+
+Type part of a name (any member of a household), a phone number (any format, or just its last 4 digits), an email, a birth date, a Member ID, a church, a city or a ZIP. Every word has to match, in any order, and names count most. **Households**, **People** and **Churches** narrow the results, as do a plan and **Include inactive**. Open a result for its card:
+
+- **A household** has its phone, email and address (each with **Copy**), church, plan and status; everyone in it with their role, birth date and age; the newsletters it gets; its fields and FundTrack details; and any other account at the same address.
+- **A person** has their birth date and age, role, gender, household, church, newsletters and fields. A birth date that can't be right (a year like 1011) gets no age and a **Check** mark.
+- **A church** has its code, type, denomination, contacts, every household in it, and **Print household list** (choose "Microsoft Print to PDF" to save it as a PDF).
+
+Names on a card open their own card; **Back** or **Esc** returns. Keys: `/` search, `1`–`4` the tabs, `↓` or `j`/`k` to move, **Enter** to open. **Show on Members page** opens the spreadsheet at that person or church.
+
+## Lists
+
+Pick **People**, **Households** or **Churches**, then add conditions on any field: the built-in ones, **Age**, **Birth month**, **Children in household**, **Oldest member's age**, which newsletters each gets, your own fields, FundTrack's details, and **Miles from** a ZIP code you type in. Tests depend on the field: contains, is, starts with, at least, at most, between, before, after, in month, in year, is blank. Match **all** or **any** condition, open **Columns** to choose what's shown, and click a column heading to sort. **Save as spreadsheet…** (Excel or CSV), **Print**, or **Save list as…** to keep it under **Start from** for everyone, where the ready-made lists are too: 65 and over, under 18, birthdays this month, heads of household, a household mailing list, households with no email or no phone, and church contacts. A saved list runs on the list as it is when it's opened. Click a row to open its card on Find.
+
+## Near ZIP
+
+How many households and people live within 10, 25, 50, 75 and 100 miles of a ZIP code (up to 250), and a table of ZIP codes with their distance and counts, for active households or all of them, on any plan or one. Counts only: no names, phones or addresses, so its printout and spreadsheet can go to a hospital the office is contracting with. Distances are straight-line miles between ZIP code centre points (`lib/zip-locations.txt`, from the US Census Bureau's 2025 Gazetteer, public domain), not driving distance. A PO-box-only ZIP is placed at the nearest ZIP in its area and marked approximate.
 
 ## Who's on it
 
@@ -76,9 +109,9 @@ The list is JSON files in `<AB Apps folder>\MemberManager\`. Only MemberManager'
 
 | File | What's in it |
 | --- | --- |
-| `contacts.json` | people: `{ id, name, email, memberId, memberStatus, orgId, householdId, subs, fields, sourceBatch, createdAt, updatedAt }` |
+| `contacts.json` | people: `{ id, name, email, memberId, memberStatus, orgId, householdId, subs, fields, sourceBatch, createdAt, updatedAt }`, and from FundTrack `fundTrackId`, `fundTrackGroupId` (their account), `fundTrack` (details), and on an account's head `fundTrackAccount` |
 | `households.json` | addresses: `{ id, addressLine1, addressLine2, city, state, zip, subs, fields }` |
-| `orgs.json` | organizations: `{ id, name, attn, email, addressLine1 … zip, subs, fields, sourceBatch }` |
+| `orgs.json` | organizations: `{ id, name, attn, email, addressLine1 … zip, subs, fields, sourceBatch }`, and from FundTrack `fundTrackId`, `contacts` and `fundTrack` |
 | `publications.json` | newsletters: `{ id, name }` |
 | `fields.json` | field definitions, in column order: `{ id, label, appliesTo: "contact" \| "household" \| "org", type: "text" \| "choice" \| "number" \| "date" \| "yesno" }` |
 | `retired.json` | records that left the list: `{ kind: "contact" \| "household" \| "org", fromId, toId, snapshot, at }` |
@@ -86,7 +119,7 @@ The list is JSON files in `<AB Apps folder>\MemberManager\`. Only MemberManager'
 
 - **`subs`** are `{ [publicationId]: { email, mail, copies } }`. A person uses `email`, a household `mail` and `copies`, an organization all three. `lib/contactRules.js` has the rules for who actually gets what.
 - **`fields`** are `{ [field id]: value }`. Dates are `YYYY-MM-DD`, Yes/No is `true`/`false`, and a blank field has no entry. Look a field up in `fields.json` by id for its name; a value whose id isn't there any more belongs to a removed field.
-- **A household's Member ID** is its head's: the person in it with a `memberId`.
+- **A household's Member ID** is its head's: the person in it with a `memberId`. Only heads have one, so "everyone with a Member ID" is one person per member household, as FormTracker uses it. An account's Phone, Plan and Household type are its head's fields.
 - **`retired.json`** says where records went when they were deleted (`toId` is null) or merged or combined into another (`toId` is the one kept). `snapshot` is the record as it was. An app that keeps its own records of people, such as mailings, follows it: a mailing that hasn't gone out moves to `toId` or drops the person, and one that has keeps the snapshot to say who it went to.
 - Read the files leniently. A file mid-sync can fail to parse, so keep the last good copy and try again shortly.
 
@@ -99,7 +132,7 @@ The same as SendNewsletters: one computer is the **host** and saves everyone's c
 ```
 npm install
 npm start
-npm test    # imports, fields, and the build settings
+npm test    # imports, fields, FundTrack, Find, Lists, Near ZIP, and the build settings
 ```
 
 `MEMBERMANAGER_DATA_DIR` keeps this computer's own settings in another folder, and `MEMBERMANAGER_APPDATA` reads AB Apps' sign-in from `<folder>\AB Apps\identity.json` instead of the real one. Set both for a test run that can't touch the real AB Apps folder.
@@ -136,5 +169,7 @@ The release appears as `MemberManager-Setup-X.Y.Z.exe` with its `.blockmap` and 
 - `lib/fields.js`: field kinds, reading and showing values (shared with the window).
 - `lib/listImport.js`, `lib/membership.js`, `lib/matching.js`, `lib/duplicates.js`: imports, the membership export's set-up, name and address comparison, and finding duplicates.
 - `lib/sensitiveColumns.js`: the identity and health columns that are never kept.
+- `lib/fundTrack.js`: FundTrack's exports: finding them, everyone in each household, the churches.
+- `lib/memberModel.js`, `lib/search.js`, `lib/lists.js`, `lib/nearZip.js` (with `zip-locations.txt`): Find, Lists and Near ZIP.
 - `lib/team.js`: sharing a data folder between computers.
-- `renderer/`: the window (plain HTML/CSS/JS). `grid.js` is the spreadsheet, and `pages/fields.js` the Fields page.
+- `renderer/`: the window (plain HTML/CSS/JS). `grid.js` is the spreadsheet; `pages/` has a file for each page.

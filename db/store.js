@@ -366,6 +366,8 @@ const LOCAL_SETTINGS = new Set([
   "gfConsumerSecret",
   "gfFormId",
   "gfFormTitle",
+  "fundTrackFolder",
+  "fundTrackChoices",
 ]);
 
 const localSettingsPath = () => path.join(localDir, "local-settings.json");

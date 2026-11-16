@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, nativeTheme, clipboard } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
@@ -15,7 +15,12 @@ const Fields = require("./lib/fields");
 const { isSensitive } = require("./lib/sensitiveColumns");
 const duplicates = require("./lib/duplicates");
 const gravityForms = require("./lib/gravityForms");
-const { membershipPreset } = require("./lib/membership");
+const { membershipPreset, DEFAULT_PLAN, PLAN_COLUMN } = require("./lib/membership");
+const fundTrack = require("./lib/fundTrack");
+const { buildModel } = require("./lib/memberModel");
+const searchLib = require("./lib/search");
+const lists = require("./lib/lists");
+const nearZip = require("./lib/nearZip");
 const { appFolder, chooseFolder, readMovedNote, moveToAbApps } = require("ab-common/appfolder");
 const { readIdentity, watchIdentity, sharedServices } = require("./lib/abApps");
 const { Team, peopleDir, readPeople, isActive, activeHosts } = require("./lib/team");
@@ -988,6 +993,594 @@ ${dir}
 });
 
 // ---------------------------------------------------------------------------
+// Find, Lists and Near ZIP
+// ---------------------------------------------------------------------------
+// Finding anyone (lib/search.js), lists of anyone on any field
+// (lib/lists.js) and how many members live near a place (lib/nearZip.js),
+// all from one model of the list (lib/memberModel.js). The model is built
+// again only when the list's files change or this computer makes a change.
+
+let modelCache = null;
+
+function modelKey() {
+  const stamp = ["contacts", "households", "orgs", "fields", "publications"]
+    .map((name) => {
+      try {
+        const s = fs.statSync(path.join(store.getDataDir(), `${name}.json`));
+        return `${s.mtimeMs}:${s.size}`;
+      } catch {
+        return "-";
+      }
+    })
+    .join("|");
+  return `${store.getDataDir()}|${stamp}|${team ? team.unsavedCount() : 0}|${new Date().toDateString()}`;
+}
+
+function currentModel() {
+  const key = modelKey();
+  if (modelCache?.key !== key) {
+    const list = loadList();
+    const model = buildModel({ contacts: list.contacts, households: list.households, orgs: list.orgs, publications: list.publications, fields: store.list("fields") });
+    modelCache = { key, model, index: searchLib.buildIndex(model), catalogs: new Map() };
+  }
+  return modelCache;
+}
+
+function listCatalog(kind, zip) {
+  const cache = currentModel();
+  const origin = nearZip.zip5(zip);
+  const key = `${kind}|${origin}`;
+  if (!cache.catalogs.has(key)) {
+    const zips = origin ? nearZip.loadZips() : null;
+    cache.catalogs.set(key, lists.catalog(cache.model, lists.KINDS[kind] ? kind : "people", origin && zips.has(origin) ? { zips, origin } : null));
+  }
+  return cache.catalogs.get(key);
+}
+
+const plansOf = (model) => [...new Set(model.households.map((h) => h.plan).filter(Boolean))].sort();
+
+ipcMain.handle("find:search", async (event, query, options) => {
+  const { model, index } = currentModel();
+  return { ...searchLib.search(index, query, options || {}), plans: plansOf(model), empty: !model.people.length && !model.churches.length };
+});
+
+// A household, person or church, with what its card shows.
+ipcMain.handle("find:card", async (event, k, id) => {
+  const { model } = currentModel();
+  const church = (orgId) => (model.byChurch.has(orgId) ? { id: orgId, name: model.byChurch.get(orgId).name } : null);
+  const own = (record, appliesTo, skipBuiltIn = true) => {
+    const builtIn = new Set(Object.values(model.F).filter(Boolean).map((f) => f.id));
+    return model.fields
+      .filter((f) => f.appliesTo === appliesTo && !(skipBuiltIn && builtIn.has(f.id)))
+      .map((f) => ({ label: f.label, value: Fields.formatValue(f.type, record?.fields?.[f.id]) }))
+      .filter((x) => x.value !== "");
+  };
+  const pubs = model.publications;
+  const personSummary = (p) => ({ id: p.id, name: p.name, role: p.role, birth: p.birthShown, age: p.age, birthCheck: p.birthCheck, status: p.active ? "Active" : "Inactive", email: p.email, gender: p.gender });
+  if (k === "h") {
+    const h = model.byHousehold.get(id);
+    if (!h) return null;
+    const head = model.byPerson.get(h.headId);
+    const place = model.mail.get(h.mailHouseholdId);
+    const sharing = model.households.filter((x) => x.key !== h.key && x.mailHouseholdId && x.mailHouseholdId === h.mailHouseholdId).map((x) => ({ key: x.key, name: x.name }));
+    const newsletters = pubs
+      .map((pub) => {
+        const ways = [];
+        if (rules.getsMail(place, pub.id)) ways.push(`by mail (${rules.copiesFor(place, pub.id)} ${rules.copiesFor(place, pub.id) === 1 ? "copy" : "copies"} to the address)`);
+        const emailed = h.memberIds.map((pid) => model.byPerson.get(pid)).filter((p) => rules.getsEmail(p.record, pub.id));
+        if (emailed.length) ways.push(`by email to ${emailed.map((p) => p.name).join(", ")}`);
+        if (rules.coveredBy(model.byChurch.get(h.orgId)?.record, pub.id)) ways.push("through their church's batch");
+        return ways.length ? { name: pub.name, how: ways.join("; ") } : null;
+      })
+      .filter(Boolean);
+    return {
+      k,
+      id,
+      name: h.name,
+      fundTrack: h.fundTrack,
+      memberId: h.memberId,
+      status: h.status,
+      plan: h.plan,
+      type: h.type,
+      phone: h.phone,
+      email: h.email,
+      address: [h.addressLine1, h.addressLine2, [h.city, [h.state, h.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(Boolean),
+      church: church(h.orgId),
+      head: head ? { id: head.id, name: head.name } : null,
+      members: h.memberIds.map((pid) => personSummary(model.byPerson.get(pid))),
+      newsletters,
+      fields: [...own(head?.record, "contact"), ...own(place, "household")],
+      details: h.account || {},
+      sharing,
+    };
+  }
+  if (k === "p") {
+    const p = model.byPerson.get(id);
+    if (!p) return null;
+    const c = p.record;
+    const newsletters = pubs
+      .map((pub) => {
+        const ways = [];
+        if (rules.getsEmail(c, pub.id)) ways.push("by email");
+        if (rules.getsMail(model.mail.get(c.householdId), pub.id)) ways.push("by mail, with their household");
+        if (rules.coveredBy(model.byChurch.get(c.orgId)?.record, pub.id)) ways.push("through their church's batch");
+        return ways.length ? { name: pub.name, how: ways.join("; ") } : null;
+      })
+      .filter(Boolean);
+    return {
+      k,
+      id,
+      ...personSummary(p),
+      memberId: p.memberId,
+      phone: p.phone || p.household?.phone || "",
+      household: p.household ? { key: p.household.key, name: p.household.name } : null,
+      address: p.household ? [p.household.addressLine1, p.household.addressLine2, [p.household.city, [p.household.state, p.household.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(Boolean) : [],
+      church: church(p.orgId),
+      newsletters,
+      fields: own(c, "contact"),
+      details: c.fundTrack || {},
+    };
+  }
+  if (k === "c") {
+    const c = model.byChurch.get(id);
+    if (!c) return null;
+    const newsletters = pubs
+      .map((pub) => {
+        const s = rules.sub(c.record, pub.id);
+        const ways = [];
+        if (rules.getsMail(c.record, pub.id)) ways.push(`a batch of ${rules.copiesFor(c.record, pub.id)} by mail`);
+        if (rules.getsEmail(c.record, pub.id)) ways.push("by email");
+        return ways.length || s.mail ? { name: pub.name, how: ways.join("; ") || "by mail (no address yet)" } : null;
+      })
+      .filter(Boolean);
+    return {
+      k,
+      id,
+      name: c.name,
+      code: c.code,
+      type: c.type,
+      denomination: c.denomination,
+      status: c.status,
+      attn: c.attn,
+      email: c.email,
+      phone: c.phone,
+      contacts: c.contacts,
+      address: [c.addressLine1, c.addressLine2, [c.city, [c.state, c.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(Boolean),
+      households: c.householdKeys
+        .map((key) => model.byHousehold.get(key))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((h) => ({ key: h.key, name: h.name, place: [h.city, h.state].filter(Boolean).join(", "), size: h.size, active: h.active })),
+      people: c.people,
+      newsletters,
+      fields: own(c.record, "org"),
+      details: c.record.fundTrack || {},
+    };
+  }
+  return null;
+});
+
+// ---- printing ----
+// Printed through a hidden window, so Windows' print dialog offers any
+// printer or "Microsoft Print to PDF".
+
+const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const PRINT_CSS = `
+  body { font: 10pt "Segoe UI", Arial, sans-serif; color: #000; margin: 0.4in; }
+  h1 { font-size: 15pt; margin: 0 0 4px; } p.sub { margin: 0 0 12px; color: #444; }
+  table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid #bbb; padding: 3px 6px; text-align: left; vertical-align: top; }
+  th { font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; } td.num, th.num { text-align: right; }
+  tr { page-break-inside: avoid; } .foot { margin-top: 10px; color: #444; font-size: 8.5pt; }`;
+
+async function printTable(title, subtitle, columns, rows, foot = "") {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${PRINT_CSS}</style></head><body>
+    <h1>${escapeHtml(title)}</h1><p class="sub">${escapeHtml(subtitle)}</p>
+    <table><thead><tr>${columns.map((c) => `<th class="${c.num ? "num" : ""}">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((row) => `<tr>${row.map((cell, i) => `<td class="${columns[i].num ? "num" : ""}">${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>
+    <p class="foot">${escapeHtml(foot)}${foot ? " · " : ""}Printed ${escapeHtml(new Date().toLocaleDateString())} from MemberManager</p></body></html>`;
+  const file = path.join(os.tmpdir(), `membermanager-print-${randomUUID()}.html`);
+  fs.writeFileSync(file, html, "utf8");
+  const win = new BrowserWindow({ show: false, webPreferences: { javascript: false } });
+  try {
+    await win.loadFile(file);
+    await new Promise((resolve) => win.webContents.print({ printBackground: false }, () => resolve()));
+  } finally {
+    win.destroy();
+    fs.rmSync(file, { force: true });
+  }
+  return true;
+}
+
+// A church's households, to print or save as a PDF.
+ipcMain.handle("find:print-church", async (event, id) => {
+  const { model } = currentModel();
+  const c = model.byChurch.get(id);
+  if (!c) throw new Error("That church is no longer on the list.");
+  const rows = c.householdKeys
+    .map((key) => model.byHousehold.get(key))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((h) => [h.name, h.memberId, [h.addressLine1, h.addressLine2, [h.city, h.state, h.zip].filter(Boolean).join(" ")].filter(Boolean).join(", "), h.phone, String(h.size), h.active ? "" : "Inactive"]);
+  return printTable(`${c.name}: households`, [c.code && `Code ${c.code}`, `${rows.length.toLocaleString()} households, ${c.people.toLocaleString()} people`].filter(Boolean).join(" · "), [
+    { label: "Household" },
+    { label: "Member ID" },
+    { label: "Address" },
+    { label: "Phone" },
+    { label: "People", num: true },
+    { label: "" },
+  ], rows);
+});
+
+// ---- Lists ----
+
+const LIST_PAGE = 300;
+
+// The renderer's state, tidied: { kind, conds, match, cols, sort, dir, zip }.
+function listState(state) {
+  const kind = lists.KINDS[state?.kind] ? state.kind : "people";
+  const cat = listCatalog(kind, state?.zip);
+  const conds = (state?.conds || []).filter((c) => c && cat.byKey.has(c.k)).map((c) => ({ k: c.k, op: String(c.op || ""), v: String(c.v ?? ""), v2: String(c.v2 ?? "") }));
+  const cols = (state?.cols?.length ? state.cols : lists.DEFAULT_COLUMNS[kind]).filter((k) => cat.byKey.has(k));
+  const sort = cat.byKey.has(state?.sort) ? state.sort : null;
+  return { kind, cat, conds, match: state?.match === "any" ? "any" : "all", cols, sort, dir: state?.dir === -1 ? -1 : 1, zip: nearZip.zip5(state?.zip) };
+}
+
+function runListState(state) {
+  const s = listState(state);
+  let records = lists.runList(s.cat, s.conds, s.match);
+  if (s.sort) records = lists.sortRecords(records, s.cat.byKey.get(s.sort), s.dir);
+  const columns = s.cols.map((k) => s.cat.byKey.get(k));
+  return { s, records, columns, title: s.conds.length ? s.conds.map((c) => lists.describe(s.cat, c)).join(s.match === "any" ? " or " : ", ") : `All ${lists.KINDS[s.kind].toLowerCase()}` };
+}
+
+ipcMain.handle("lists:catalog", async (event, kind, zip) => {
+  const cat = listCatalog(lists.KINDS[kind] ? kind : "people", zip);
+  const origin = nearZip.zip5(zip);
+  return {
+    kinds: lists.KINDS,
+    ops: lists.OPS,
+    fields: cat.fields.map((f) => ({ k: f.k, label: f.label, group: f.group, type: f.type, opts: f.opts })),
+    defaultColumns: lists.DEFAULT_COLUMNS,
+    presets: lists.presets(),
+    saved: store.getSettings().savedLists || [],
+    zipKnown: !origin || nearZip.loadZips().has(origin),
+  };
+});
+
+ipcMain.handle("lists:run", async (event, state, shown = LIST_PAGE) => {
+  const { s, records, columns, title } = runListState(state);
+  return {
+    total: records.length,
+    title,
+    columns: columns.map((f) => ({ k: f.k, label: f.label, type: f.type })),
+    rows: records.slice(0, Math.max(LIST_PAGE, shown)).map((r) => ({ ref: lists.recordRef(s.kind, r), cells: columns.map((f) => lists.display(f, f.get(r))) })),
+  };
+});
+
+// Column headings, made unique for a spreadsheet: a second "Church" is "Church (Household)".
+function uniqueHeadings(columns) {
+  const seen = new Map();
+  return columns.map((f) => {
+    const n = seen.get(f.label) || 0;
+    seen.set(f.label, n + 1);
+    return n ? `${f.label} (${f.group})` : f.label;
+  });
+}
+
+ipcMain.handle("lists:export", async (event, state) => {
+  const { records, columns, title } = runListState(state);
+  const headings = uniqueHeadings(columns);
+  const rows = records.map((r) => Object.fromEntries(columns.map((f, i) => [headings[i], lists.display(f, f.get(r))])));
+  return saveTable(headings, rows, { title: "Save the list", defaultName: title.replace(/[^\w ,.-]+/g, " ").slice(0, 80).trim() || "list", sheetName: "List" });
+});
+
+ipcMain.handle("lists:print", async (event, state) => {
+  const { s, records, columns, title } = runListState(state);
+  const headings = uniqueHeadings(columns);
+  return printTable(
+    title,
+    `${records.length.toLocaleString()} ${lists.KINDS[s.kind].toLowerCase()}`,
+    columns.map((f, i) => ({ label: headings[i], num: f.type === "num" })),
+    records.map((r) => columns.map((f) => String(lists.display(f, f.get(r)) ?? "")))
+  );
+});
+
+// Lists kept by name, for everyone using the list.
+ipcMain.handle("lists:save", async (event, name, state) => {
+  const clean = cleanText(name);
+  if (!clean) throw new Error("Give the list a name.");
+  const saved = (store.getSettings().savedLists || []).filter((l) => l.name.toLowerCase() !== clean.toLowerCase());
+  const { kind, conds, match, cols, sort, dir, zip } = listState(state);
+  saved.push({ id: randomUUID(), name: clean, state: { kind, conds, match, cols, sort, dir, zip } });
+  saved.sort((a, b) => a.name.localeCompare(b.name));
+  store.updateSettings({ savedLists: saved });
+  return saved;
+});
+
+ipcMain.handle("lists:delete", async (event, id) => {
+  const saved = (store.getSettings().savedLists || []).filter((l) => l.id !== id);
+  store.updateSettings({ savedLists: saved });
+  return saved;
+});
+
+// ---- Near ZIP ----
+
+function nearState(options) {
+  const zip = nearZip.zip5(options?.zip);
+  const maxMi = nearZip.MAX_CHOICES.includes(Number(options?.maxMi)) ? Number(options.maxMi) : 100;
+  return { zip, maxMi, plan: String(options?.plan || ""), inactive: !!options?.inactive };
+}
+
+function nearFor(options) {
+  const o = nearState(options);
+  const { model } = currentModel();
+  if (!o.zip) return { o, report: null, plans: plansOf(model) };
+  const report = nearZip.nearReport(model, nearZip.loadZips(), o.zip, o);
+  return { o, report, plans: plansOf(model), unknownZip: !report };
+}
+
+ipcMain.handle("near:report", async (event, options) => {
+  const { o, report, plans, unknownZip } = nearFor(options);
+  return { options: o, report, plans, unknownZip: !!unknownZip, bands: nearZip.BANDS, maxChoices: nearZip.MAX_CHOICES };
+});
+
+const nearScope = (o) => [`from ZIP ${o.zip}`, `up to ${o.maxMi} miles`, o.plan && `plan ${o.plan}`, o.inactive ? "including inactive households" : "active households"].filter(Boolean).join(" · ");
+const nearRows = (report) => report.zips.map((z) => [z.zip, `${z.miles.toFixed(1)}${z.approx ? " (approx.)" : ""}`, z.city, z.state, String(z.households), String(z.people)]);
+const NEAR_COLUMNS = [{ label: "ZIP" }, { label: "Miles", num: true }, { label: "City" }, { label: "State" }, { label: "Households", num: true }, { label: "People", num: true }];
+
+ipcMain.handle("near:export", async (event, options) => {
+  const { o, report } = nearFor(options);
+  if (!report) throw new Error("Enter a ZIP code first.");
+  const headings = NEAR_COLUMNS.map((c) => c.label);
+  const rows = [
+    ...report.bands.map((b) => ({ ZIP: `Within ${b.to} miles`, Miles: "", City: "", State: "", Households: b.households, People: b.people })),
+    ...nearRows(report).map((cells) => Object.fromEntries(headings.map((h, i) => [h, cells[i]]))),
+  ];
+  return saveTable(headings, rows, { title: "Save the counts", defaultName: `members near ${o.zip}`, sheetName: "Near ZIP" });
+});
+
+ipcMain.handle("near:print", async (event, options) => {
+  const { o, report } = nearFor(options);
+  if (!report) throw new Error("Enter a ZIP code first.");
+  const bands = report.bands.map((b) => `within ${b.to} mi: ${b.households.toLocaleString()} households, ${b.people.toLocaleString()} people`).join(" · ");
+  return printTable(`Members near ZIP ${o.zip}`, nearScope(o), NEAR_COLUMNS, nearRows(report), `${bands}. Straight-line miles between ZIP code centre points (US Census Bureau); counts only`);
+});
+
+// ---------------------------------------------------------------------------
+// FundTrack's exports
+// ---------------------------------------------------------------------------
+// The whole membership from FundTrack's weekly exports (lib/fundTrack.js):
+// every household on every plan, active or not, with everyone in it, and the
+// churches' details -- for finding anyone (the Find, Lists and Near ZIP
+// pages). Households come in the way the membership export always has (heads
+// matched by Member ID; a household new to the list on the Medical Aid & Alms
+// Plan gets Our Health by mail, others get nothing), and re-importing a newer
+// export updates everyone in place.
+
+const FUNDTRACK_TABLE_NAMES = Object.fromEntries(Object.entries(fundTrack.TABLES).map(([key, t]) => [key, t.name]));
+
+// Where the exports usually are: an "exports" folder in the archive library
+// synced beside the AB Apps folder's library, unless one was chosen.
+function guessExportsFolder() {
+  const saved = store.getSettings().fundTrackFolder;
+  if (saved && fs.existsSync(saved)) return saved;
+  const start = abIdentity?.dataDir;
+  if (!start) return null;
+  let dir = path.dirname(start);
+  for (let up = 0; up < 3 && dir && dir !== path.dirname(dir); up++, dir = path.dirname(dir)) {
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        const candidate = path.join(dir, name, "exports");
+        if (/archive/i.test(name) && fs.existsSync(candidate)) return candidate;
+      }
+    } catch {
+      // not readable; look further up
+    }
+  }
+  return null;
+}
+
+// Files are recognized by their columns, whatever they're called
+// (lib/fundTrack.js, scanExports). A file chosen for a table on the Import
+// page is kept for that folder on this computer until it's set back to the
+// newest.
+function fundTrackChoices(folder) {
+  const saved = store.getSettings().fundTrackChoices;
+  return saved && folder && samePath(saved.folder || "", folder) ? saved.files || {} : {};
+}
+
+// Raw exports hold Social Security and health columns MemberManager never
+// keeps; in the shared AB Apps folder, everyone it's shared with could open them.
+const insideAbApps = (folder) => {
+  const shared = abIdentity?.dataDir;
+  if (!folder || !shared) return false;
+  const rel = path.relative(path.resolve(shared), path.resolve(folder));
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+};
+
+function fundTrackStatus(folder) {
+  if (!folder || !fs.existsSync(folder)) return { folder: folder || null, found: {}, files: [], unknown: [], ignored: [], missing: Object.values(FUNDTRACK_TABLE_NAMES), insideAbApps: false };
+  const { found, files, unknown, ignored } = fundTrack.scanExports(folder, fundTrackChoices(folder));
+  const missing = Object.entries(FUNDTRACK_TABLE_NAMES)
+    .filter(([key]) => !found[key])
+    .map(([, name]) => name);
+  return { folder, found, files, unknown, ignored, missing, insideAbApps: insideAbApps(folder) };
+}
+
+const fundTrackSummary = (folder) => ({
+  ...fundTrackStatus(folder),
+  lastImport: store.getSettings().fundTrackImport || null,
+  fieldsToAdd: fundTrack.missingFields(store.list("fields")),
+});
+
+ipcMain.handle("fundtrack:status", async () => fundTrackSummary(guessExportsFolder()));
+
+// Uses `file` for `table` (or, with none, the newest again).
+ipcMain.handle("fundtrack:choose", async (event, table, file) => {
+  const folder = guessExportsFolder();
+  if (!folder || !FUNDTRACK_TABLE_NAMES[table]) return fundTrackSummary(folder);
+  const files = { ...fundTrackChoices(folder) };
+  if (file) {
+    const known = fundTrack.scanExports(folder).files.find((f) => f.file === file);
+    if (!known) throw new Error(`${file} isn't in ${folder} any more.`);
+    if (known.table !== table) throw new Error(`${file} has the columns of ${FUNDTRACK_TABLE_NAMES[known.table]}, not ${FUNDTRACK_TABLE_NAMES[table]}.`);
+    files[table] = file;
+  } else delete files[table];
+  store.updateSettings({ fundTrackChoices: { folder, files } });
+  return fundTrackSummary(folder);
+});
+
+ipcMain.handle("fundtrack:pick-folder", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { title: "Choose the folder FundTrack's exports are saved in", properties: ["openDirectory"] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  store.updateSettings({ fundTrackFolder: result.filePaths[0] });
+  return fundTrackSummary(result.filePaths[0]);
+});
+
+function readFundTrack(folder) {
+  const status = fundTrackStatus(folder);
+  for (const key of ["groups", "individuals"]) {
+    if (!status.found[key]) throw new Error(`There's no ${FUNDTRACK_TABLE_NAMES[key]} export in ${folder || "the exports folder"}.`);
+  }
+  const read = (key) => (status.found[key] ? fundTrack.readExport(path.join(folder, status.found[key].file)) : { headers: [], rows: [] });
+  const groups = read("groups");
+  // A household with no Member ID (GroupCode) can't be found again next time,
+  // so it would be added again and again: it's left out, and counted.
+  const withCode = groups.rows.filter((r) => String(r.GroupCode || "").trim());
+  return {
+    status,
+    groups: { ...groups, rows: withCode },
+    noMemberId: groups.rows.length - withCode.length,
+    individuals: read("individuals"),
+    orgs: read("orgs"),
+    contacts: read("contacts"),
+    addresses: read("addresses"),
+  };
+}
+
+// The households' import (lib/listImport.js), set up for MemberGroups: the
+// membership export's mapping, plus Phone, Plan and Household type on the
+// head.
+function fundTrackHouseholdImport(groups, fields, plan, publications) {
+  const preset = membershipPreset(groups.headers, groups.rows, publications);
+  if (!preset) throw new Error("The MemberGroups export doesn't have the columns MemberManager expects (GroupCode, MemberGroupUID, PrimaryAddressLine1, statusTerm, fundName).");
+  const index = fundTrack.fieldIndex(fields);
+  // The account's own fields, on its head (lib/fundTrack.js).
+  const target = (label, column) => {
+    const field = index.contact[label.toLowerCase()];
+    return field ? { [column]: `field:${field.id}` } : {};
+  };
+  const mapping = withoutSensitive({ ...preset.mapping, ...target("Phone", "PrimaryPhone"), ...target("Plan", "fundName"), ...target("Household type", "GroupType") });
+  const base = { ...preset.options, mode: "person", defaultCopies: "1", addInactive: true, sourceBatch: `FundTrack ${new Date().toLocaleDateString()}` };
+  return {
+    mapping,
+    // The newsletter plan's households can get Our Health; everyone else's are only kept.
+    passes: [
+      { ...base, only: { column: PLAN_COLUMN, value: plan } },
+      { ...base, only: { column: PLAN_COLUMN, value: plan, not: true }, publicationIds: [] },
+    ],
+  };
+}
+
+ipcMain.handle("fundtrack:preview", async () => {
+  const folder = guessExportsFolder();
+  const data = readFundTrack(folder);
+  const existingFields = store.list("fields");
+  const fields = [...existingFields, ...fundTrack.missingFields(existingFields).map((f, i) => ({ ...f, id: `new-${i}` }))];
+  const list = loadList();
+  const { mapping, passes } = fundTrackHouseholdImport(data.groups, fields, DEFAULT_PLAN, list.publications);
+  const existing = { contacts: list.contacts, households: list.households, orgs: list.orgs };
+  const missingPeople = new Set(data.groups.rows.map((r) => String(r.MemberGroupUID || "").trim()));
+  const [a, b] = passes.map((options) => listImport.planImport(data.groups.rows, mapping, options, existing, list.publications, fields).stats);
+  const plans = new Map();
+  for (const row of data.groups.rows) plans.set(row[PLAN_COLUMN], (plans.get(row[PLAN_COLUMN]) || 0) + 1);
+  const linked = new Set(list.contacts.filter((c) => c.fundTrackId).map((c) => c.fundTrackId));
+  return {
+    ...fundTrackSummary(folder),
+    households: data.groups.rows.length,
+    householdsWithoutMemberId: data.noMemberId,
+    people: data.individuals.rows.length,
+    peopleLinked: data.individuals.rows.filter((r) => linked.has(String(r.MemberIndividualUUID || "").trim())).length,
+    // People whose household isn't in the MemberGroups export (exported on another day, say).
+    peopleWithoutHousehold: data.individuals.rows.filter((r) => !missingPeople.has(String(r.MemberGroupUID || "").trim())).length,
+    mixedDates: fundTrack.mixedDates(data.status.found),
+    churches: data.orgs.rows.length,
+    plans: [...plans].map(([name, count]) => ({ name, count })).sort((x, y) => y.count - x.count),
+    householdStats: {
+      added: a.added + b.added,
+      updated: a.updated + b.updated,
+      unchanged: a.unchanged + b.unchanged,
+      inactiveStopped: a.inactiveStopped + b.inactiveStopped,
+      ambiguous: a.ambiguous + b.ambiguous,
+    },
+  };
+});
+
+ipcMain.handle("fundtrack:commit", async () => {
+  const folder = guessExportsFolder();
+  const data = readFundTrack(folder);
+  const now = new Date().toISOString();
+  const batch = `FundTrack ${new Date().toLocaleDateString()}`;
+  for (const def of fundTrack.missingFields(store.list("fields"))) store.insert("fields", def);
+  const fields = store.list("fields");
+
+  // 1. Households and their heads.
+  const { mapping, passes } = fundTrackHouseholdImport(data.groups, fields, DEFAULT_PLAN, store.list("publications"));
+  const householdStats = { added: 0, updated: 0, unchanged: 0, inactiveStopped: 0, ambiguous: 0 };
+  for (const options of passes) {
+    const list = loadList();
+    const plan = listImport.planImport(data.groups.rows, mapping, options, { contacts: list.contacts, households: list.households, orgs: list.orgs }, list.publications, fields);
+    applyImportPlan(plan, list);
+    for (const key of Object.keys(householdStats)) householdStats[key] += plan.stats[key] || 0;
+  }
+
+  // 2. Each account's FundTrack id and details, on its head (found by Member ID).
+  const memberKey = (id) => String(id || "").toUpperCase().replace(/[\s-]/g, "");
+  let list = loadList();
+  const headByMemberId = new Map(list.contacts.filter((c) => c.memberId).map((c) => [memberKey(c.memberId), c]));
+  const headPatches = new Map();
+  const headOf = new Map(); // FundTrack household id -> { householdId, orgId, headId }
+  for (const row of data.groups.rows) {
+    const head = headByMemberId.get(memberKey(row.GroupCode));
+    if (!head) continue;
+    let householdId = head.householdId && list.householdById.has(head.householdId) ? head.householdId : null;
+    const info = fundTrack.accountDetails(row);
+    if (!householdId) {
+      // A head with no address yet still needs a household for everyone else in their account.
+      householdId = store.insert("households", { ...BLANK_HOUSEHOLD, createdAt: now, updatedAt: now }).id;
+      headPatches.set(head.id, { ...info, householdId });
+    } else headPatches.set(head.id, info);
+    headOf.set(info.fundTrackGroupId, { householdId, orgId: head.orgId || null, headId: head.id });
+  }
+  const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  store.updateWhere("contacts", (c) => {
+    const patch = headPatches.get(c.id);
+    if (!patch || Object.entries(patch).every(([key, value]) => sameJson(c[key], value))) return null;
+    return { ...patch, updatedAt: now };
+  });
+
+  // 3. Everyone in each household.
+  list = loadList();
+  const people = fundTrack.planPeople(data.individuals.rows, list.contacts, (groupUid) => headOf.get(groupUid) || null, fields, { sourceBatch: batch });
+  store.insertMany("contacts", people.inserts.map((c) => ({ ...BLANK_CONTACT, ...c, createdAt: now, updatedAt: now })));
+  const personPatches = new Map(people.updates.map((u) => [u.id, u.patch]));
+  store.updateWhere("contacts", (c) => (personPatches.has(c.id) ? { ...personPatches.get(c.id), updatedAt: now } : null));
+
+  // 4. The churches.
+  list = loadList();
+  const orgs = fundTrack.planOrgs(data.orgs.rows, data.contacts.rows, data.addresses.rows, list.orgs, fields, { sourceBatch: batch });
+  store.insertMany("orgs", orgs.inserts.map((o) => ({ ...BLANK_ORG, ...o, createdAt: now, updatedAt: now })));
+  const orgPatches = new Map(orgs.updates.map((u) => [u.id, u.patch]));
+  store.updateWhere("orgs", (o) => (orgPatches.has(o.id) ? { ...orgPatches.get(o.id), updatedAt: now } : null));
+
+  const dated = Object.values(data.status.found)
+    .map((f) => f.date)
+    .sort()
+    .pop();
+  store.updateSettings({ fundTrackImport: { at: now, dated, by: shownName(), folder } });
+  dataChanged(null);
+  return { households: householdStats, people: people.stats, churches: orgs.stats, linkedHouseholds: headOf.size, householdRows: data.groups.rows.length, householdsWithoutMemberId: data.noMemberId };
+});
+
+// ---------------------------------------------------------------------------
 // Import
 // ---------------------------------------------------------------------------
 
@@ -1107,9 +1700,9 @@ ipcMain.handle("import:plan", async (event, source, mapping, options) => {
   return { stats, ambiguousNames, noAddressNames, possibleDuplicates, matches: matches.filter((m) => m.changedFields.length).slice(0, 200) };
 });
 
-ipcMain.handle("import:commit", async (event, source, mapping, options) => {
-  const plan = planImport(source, mapping, options);
-  const before = loadList();
+// Writes what an import planned (listImport.planImport); `before` is the list
+// it was planned on.
+function applyImportPlan(plan, before) {
   const now = new Date().toISOString();
   const stamp = (rows, blank) => rows.map((row) => ({ ...blank, ...row, createdAt: now, updatedAt: now }));
   const patchAll = (collection, updates) => {
@@ -1123,6 +1716,11 @@ ipcMain.handle("import:commit", async (event, source, mapping, options) => {
   patchAll("contacts", plan.contactUpdates);
   store.insertMany("contacts", stamp(plan.contactInserts, BLANK_CONTACT));
   retirePlaces("household", emptyHouseholds(plan.householdDeletes), null, before);
+}
+
+ipcMain.handle("import:commit", async (event, source, mapping, options) => {
+  const plan = planImport(source, mapping, options);
+  applyImportPlan(plan, loadList());
   if (source.kind === "signup" && signupCache?.maxEntryId) {
     store.updateSettings({ gfLastImportedEntryId: Math.max(store.getSettings().gfLastImportedEntryId || 0, signupCache.maxEntryId) });
   }
@@ -1663,6 +2261,10 @@ ipcMain.handle("dialog:confirm", async (event, message, okLabel) => {
 });
 
 ipcMain.handle("shell:open-path", async (event, filePath) => shell.openPath(filePath));
+ipcMain.handle("clipboard:copy", async (event, text) => {
+  clipboard.writeText(String(text ?? ""));
+  return true;
+});
 ipcMain.handle("app:get-version", async () => app.getVersion());
 
 // ---------------------------------------------------------------------------

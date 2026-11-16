@@ -633,3 +633,69 @@ th.num, td.num { text-align: right; }
 .fields-table .field-actions .btn { margin-left: 4px; }
 .new-field-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .new-field-form input[type=text] { width: 180px; }
+
+/* ---- Find (pages/find.js) ---- */
+.chip { display: inline-block; font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-hairline); color: var(--text-muted); vertical-align: middle; }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+kbd { font: 11px/1.4 inherit; padding: 0 5px; border: 1px solid var(--border-hairline); border-bottom-width: 2px; border-radius: 4px; color: var(--text-muted); background: var(--surface-card); }
+.find-page { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 20px; flex: 1; min-height: 0; }
+.find-left { display: flex; flex-direction: column; min-height: 0; }
+.find-left h1 { margin-bottom: 10px; }
+.find-q { width: 100%; font-size: 15px; padding: 10px 12px; }
+.find-tabs { display: flex; gap: 4px; margin: 10px 0 6px; flex-wrap: wrap; }
+.find-tab { border: 1px solid var(--border-hairline); border-radius: 6px; margin: 0; padding: 4px 10px; }
+.find-tab kbd { margin-left: 4px; }
+.find-filters { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 8px; }
+.find-filters select { max-width: 220px; }
+.find-results { flex: 1; min-height: 0; overflow-y: auto; border: 1px solid var(--border-hairline); border-radius: 8px; background: var(--surface-card); outline: none; }
+.find-row { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+.find-row:hover { background: var(--surface-card-alt); }
+.find-row.sel { box-shadow: inset 3px 0 0 var(--accent-text); background: var(--surface-card-alt); }
+.find-row.open .find-title { color: var(--accent-text); }
+.find-t1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.find-title { font-weight: 500; }
+.find-sub, .find-meta { font-size: 12px; color: var(--text-muted); }
+.find-kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: var(--tracking-label, .06em); color: var(--text-muted); white-space: nowrap; }
+.find-more { padding: 8px 12px; }
+.find-card { min-height: 0; overflow-y: auto; padding: 4px 4px 24px 0; }
+.find-hint { color: var(--text-muted); max-width: 640px; padding-top: 56px; line-height: 1.6; }
+.find-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 12px; }
+.find-name { margin: 2px 0 2px; font-size: 22px; }
+.find-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.find-back { margin-bottom: 10px; }
+.kv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 18px; margin-bottom: 12px; }
+.kv .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.kv .v { overflow-wrap: anywhere; }
+.kv .none { color: var(--text-muted); }
+.copy-btn { font-size: 11px; padding: 0 6px; margin-left: 4px; border: 1px solid var(--border-hairline); border-radius: 4px; background: var(--surface-card); color: var(--accent-text); cursor: pointer; }
+.find-sec { margin-top: 14px; }
+.find-sec h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin: 0 0 6px; font-weight: 500; }
+.find-table { width: 100%; }
+.find-table td.num, .find-table th.num { text-align: right; }
+.find-pubs { margin: 0; padding-left: 18px; }
+.find-details { margin-top: 14px; }
+.find-details summary { cursor: pointer; color: var(--accent-text); margin-bottom: 8px; }
+
+/* ---- Lists and Near ZIP (pages/lists.js, pages/near.js) ---- */
+.lists-top { margin: 6px 0; gap: 10px; }
+.lists-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.list-cond { gap: 6px; margin: 4px 0; flex-wrap: wrap; }
+.list-cond select, .list-cond input { max-width: 260px; }
+.list-join { width: 44px; text-align: right; }
+.list-x { padding: 2px 9px; }
+.list-cols { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 8px; max-height: 320px; overflow-y: auto; }
+.list-cols fieldset { border: none; padding: 0; margin: 0; min-width: 200px; }
+.list-cols legend { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 4px; }
+.list-cols .check-label { display: block; margin: 2px 0; }
+.lists-table-wrap { overflow-x: auto; }
+.lists-table { width: 100%; }
+.lists-table th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+.lists-table td.num, .lists-table th.num { text-align: right; }
+.lists-table tbody tr[data-k] { cursor: pointer; }
+.lists-table tbody tr[data-k]:hover td { background: var(--surface-card-alt); }
+.list-save-row { gap: 10px; margin-top: 10px; }
+.fundtrack-panel .ft-files { margin: 4px 0 8px; padding-left: 18px; }
+@media (max-width: 900px) { .find-page { grid-template-columns: 1fr; height: auto; } .find-results { max-height: 50vh; } }
+.fundtrack-panel table.ft-files { width: auto; margin: 6px 0 10px; }
+.fundtrack-panel table.ft-files th { text-align: left; font-weight: 500; padding-right: 14px; white-space: nowrap; }
+.fundtrack-panel table.ft-files select { max-width: 520px; }

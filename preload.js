@@ -55,6 +55,29 @@ contextBridge.exposeInMainWorld("api", {
   pickOtherAppFolder: (key) => invoke("migrate:pick-folder", key),
   copySendNewsletters: (folder) => invoke("migrate:send-newsletters", folder),
 
+  // FundTrack's exports: everyone in every household, and the churches.
+  fundTrackStatus: () => invoke("fundtrack:status"),
+  pickFundTrackFolder: () => invoke("fundtrack:pick-folder"),
+  // Which file is which table, when the newest isn't the one to use.
+  chooseFundTrackFile: (table, file) => invoke("fundtrack:choose", table, file),
+  previewFundTrack: () => invoke("fundtrack:preview"),
+  commitFundTrack: () => invoke("fundtrack:commit"),
+
+  // Find, Lists and Near ZIP.
+  findSearch: (query, options) => invoke("find:search", query, options),
+  findCard: (k, id) => invoke("find:card", k, id),
+  printChurch: (id) => invoke("find:print-church", id),
+  listCatalog: (kind, zip) => invoke("lists:catalog", kind, zip),
+  runList: (state, shown) => invoke("lists:run", state, shown),
+  exportList: (state) => invoke("lists:export", state),
+  printList: (state) => invoke("lists:print", state),
+  saveList: (name, state) => invoke("lists:save", name, state),
+  deleteList: (id) => invoke("lists:delete", id),
+  nearReport: (options) => invoke("near:report", options),
+  exportNear: (options) => invoke("near:export", options),
+  printNear: (options) => invoke("near:print", options),
+  copyText: (text) => invoke("clipboard:copy", text),
+
   getSettings: () => invoke("settings:get"),
   setTheme: (theme) => invoke("settings:set-theme", theme),
 

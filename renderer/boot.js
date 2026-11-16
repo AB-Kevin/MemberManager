@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.api.onDataChanged(onDataChanged);
   renderTeamStatus(await window.api.getTeamStatus());
 
-  navigate("contacts");
+  navigate("find");
   // After the data folder changes, the window reloads; say what happened.
   const notice = await window.api.takeNotice();
   if (notice) toast(notice);

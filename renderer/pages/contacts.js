@@ -312,9 +312,16 @@ window.Pages.contacts = {
     // Every word has to appear somewhere in the row, in any order, so
     // "smith lancaster" finds John Smith in Lancaster.
     const wordsOf = () => state[tab].search.toLowerCase().split(/\s+/).filter(Boolean);
+    // A number is also matched as digits, so a phone number is found
+    // however it's typed: (717) 555-1234, 717.555.1234 or 7175551234.
     const matchesWords = (parts, words) => {
       const hay = parts.map((v) => v || "").join(" ").toLowerCase();
-      return words.every((w) => hay.includes(w));
+      const dig = parts.map((v) => String(v || "").replace(/\D/g, "")).join(" ");
+      return words.every((w) => {
+        if (hay.includes(w)) return true;
+        const d = w.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+        return d.length >= 3 && /^[\d().+-]+$/.test(w) && dig.includes(d);
+      });
     };
 
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
