@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<title>MemberManager</title>
+<!-- Bundled, so the app looks right without an internet connection. -->
+<link rel="stylesheet" href="../node_modules/@fontsource/poppins/300.css" />
+<link rel="stylesheet" href="../node_modules/@fontsource/poppins/400.css" />
+<link rel="stylesheet" href="../node_modules/@fontsource/poppins/500.css" />
+<link rel="stylesheet" href="../node_modules/@fontsource/poppins/600.css" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="brand">
+        <img class="logo" src="assets/logo-primary-lockup.jpg" alt="Anabaptist Brotherhood" />
+        <span class="app-name">MemberManager</span>
+      </div>
+      <div class="app-header-end" id="team-line" hidden></div>
+    </header>
+    <div id="app-body">
+      <nav id="nav">
+        <button class="nav-btn" data-page="contacts">Members</button>
+        <button class="nav-btn" data-page="fields">Fields</button>
+        <button class="nav-btn" data-page="duplicates">Duplicates <span class="nav-badge" id="duplicates-badge"></span></button>
+        <button class="nav-btn" data-page="settings">Settings</button>
+        <div class="nav-footer">Version <span id="version-tag"></span></div>
+      </nav>
+      <div id="main-col">
+        <div id="team-banner" hidden></div>
+        <main id="content"></main>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script src="../lib/contactRules.js"></script>
+  <script src="../lib/fields.js"></script>
+  <script src="app.js"></script>
+  <script src="grid.js"></script>
+  <script src="pages/contacts.js"></script>
+  <script src="pages/import.js"></script>
+  <script src="pages/duplicates.js"></script>
+  <script src="pages/fields.js"></script>
+  <script src="pages/settings.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>

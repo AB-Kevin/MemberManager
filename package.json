@@ -1,0 +1,53 @@
+{
+  "name": "membermanager",
+  "version": "0.1.0",
+  "description": "MemberManager - the member list FormTracker and SendNewsletters read: people, households and organizations, the newsletters they get, and the office's own fields",
+  "main": "main.js",
+  "author": "Anabaptist Brotherhood",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "test": "node --test --test-force-exit \"test/*.test.js\"",
+    "preversion": "npm test"
+  },
+  "devDependencies": {
+    "electron": "^44.9.3",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "org.anabaptistbrotherhood.membermanager",
+    "productName": "MemberManager",
+    "files": [
+      "main.js",
+      "preload.js",
+      "db/**/*",
+      "lib/**/*",
+      "renderer/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "MemberManager-Setup-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "AB-Kevin",
+      "repo": "MemberManager",
+      "releaseType": "release"
+    }
+  },
+  "dependencies": {
+    "@fontsource/poppins": "^5.3.0",
+    "ab-common": "git+https://github.com/AB-Kevin/ab-common.git#v1.1.0",
+    "electron-updater": "^6.8.9",
+    "papaparse": "^5.4.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}
