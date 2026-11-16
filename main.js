@@ -21,6 +21,7 @@ const { buildModel } = require("./lib/memberModel");
 const searchLib = require("./lib/search");
 const lists = require("./lib/lists");
 const nearZip = require("./lib/nearZip");
+const cards = require("./lib/cards");
 const { appFolder, chooseFolder, readMovedNote, moveToAbApps } = require("ab-common/appfolder");
 const { readIdentity, watchIdentity, sharedServices } = require("./lib/abApps");
 const { Team, peopleDir, readPeople, isActive, activeHosts } = require("./lib/team");
@@ -1342,6 +1343,200 @@ ipcMain.handle("near:print", async (event, options) => {
   if (!report) throw new Error("Enter a ZIP code first.");
   const bands = report.bands.map((b) => `within ${b.to} mi: ${b.households.toLocaleString()} households, ${b.people.toLocaleString()} people`).join(" · ");
   return printTable(`Members near ZIP ${o.zip}`, nearScope(o), NEAR_COLUMNS, nearRows(report), `${bands}. Straight-line miles between ZIP code centre points (US Census Bureau); counts only`);
+});
+
+// ---------------------------------------------------------------------------
+// Member cards
+// ---------------------------------------------------------------------------
+// Card designs (lib/cards.js): a front and a back, each an SVG of the
+// preprinted card to place fields on, printed one side at a time on the card
+// printer. An SVG is kept in the data folder's card-templates folder under a
+// name of its own, so only the computer that added it ever writes it, and
+// it's only ever shown as an image -- an SVG's scripts never run.
+
+const CARD_IMAGES = "card-templates";
+
+function cardDesign(id) {
+  const design = store.get("cardTemplates", id);
+  if (!design) throw new Error("That card design is no longer there.");
+  return design;
+}
+
+// The bundled fonts as @font-face rules, read once.
+let cardFonts = null;
+const cardFontFaces = () => (cardFonts ??= cards.fontFaces((file) => fs.readFileSync(require.resolve(file))));
+
+function cardImageUrl(side) {
+  if (!side?.image) return null;
+  try {
+    return `data:image/svg+xml;base64,${fs.readFileSync(path.join(store.getDataDir(), side.image)).toString("base64")}`;
+  } catch {
+    return null; // OneDrive hasn't brought it to this computer yet
+  }
+}
+
+ipcMain.handle("cards:list", async () => store.list("cardTemplates"));
+
+ipcMain.handle("cards:get", async (event, id) => {
+  const design = cardDesign(id);
+  const images = Object.fromEntries(cards.SIDES.map((s) => [s, cardImageUrl(design.sides[s])]));
+  return {
+    design,
+    images,
+    size: cards.cardSize(design.orientation),
+    fonts: cards.FONTS.map((family) => ({ family, note: cards.BUNDLED_FONTS.find((f) => f.family === family)?.note || "" })),
+    printer: store.getSettings().cardPrinter || "",
+  };
+});
+
+ipcMain.handle("cards:create", async (event, input) => {
+  const name = cleanText(input?.name) || "Member card";
+  return store.insert("cardTemplates", { ...cards.newDesign(name, input?.cardFor, input?.orientation), updatedAt: new Date().toISOString() });
+});
+
+ipcMain.handle("cards:update", async (event, id, patch) => {
+  const design = cardDesign(id);
+  const next = cards.cleanDesign(patch || {}, design);
+  return store.update("cardTemplates", id, { ...next, updatedAt: new Date().toISOString() });
+});
+
+ipcMain.handle("cards:delete", async (event, id) => {
+  const design = cardDesign(id);
+  store.remove("cardTemplates", id);
+  for (const s of cards.SIDES) {
+    if (design.sides[s]?.image) fs.rmSync(path.join(store.getDataDir(), design.sides[s].image), { force: true });
+  }
+  return true;
+});
+
+// An SVG of the preprinted card for one side.
+ipcMain.handle("cards:set-image", async (event, id, side) => {
+  const design = cardDesign(id);
+  if (!cards.SIDES.includes(side)) throw new Error("Unknown side.");
+  const result = await dialog.showOpenDialog(mainWindow, { title: `Choose the card's ${side} (an SVG image)`, filters: [{ name: "SVG image", extensions: ["svg"] }], properties: ["openFile"] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const source = result.filePaths[0];
+  if (fs.statSync(source).size > 15 * 1024 * 1024) throw new Error("That SVG is over 15 MB. Save it again with smaller embedded pictures.");
+  const text = fs.readFileSync(source, "utf8");
+  const info = cards.svgInfo(text);
+  if (!info) throw new Error("That file isn't an SVG image.");
+  const { w, h } = cards.cardSize(design.orientation);
+  const stored = path.join(CARD_IMAGES, `${randomUUID()}.svg`);
+  fs.mkdirSync(path.join(store.getDataDir(), CARD_IMAGES), { recursive: true });
+  fs.writeFileSync(path.join(store.getDataDir(), stored), text, "utf8");
+  const old = design.sides[side]?.image;
+  const sides = { ...design.sides, [side]: { ...(design.sides[side] || cards.blankSide()), image: stored.replace(/\\/g, "/"), imageName: path.basename(source) } };
+  const saved = store.update("cardTemplates", id, { sides, updatedAt: new Date().toISOString() });
+  if (old) fs.rmSync(path.join(store.getDataDir(), old), { force: true });
+  // A picture much wider or narrower than the card is stretched to fit it.
+  const mismatch = info.aspect && Math.abs(info.aspect - w / h) / (w / h) > 0.04;
+  return { design: saved, image: cardImageUrl(saved.sides[side]), warning: mismatch ? `That image's shape doesn't match a ${design.orientation} card (${w} × ${h} mm), so it's stretched to fit. Check the orientation, or export the SVG at the card's size.` : null };
+});
+
+ipcMain.handle("cards:clear-image", async (event, id, side) => {
+  const design = cardDesign(id);
+  const old = design.sides[side]?.image;
+  const saved = store.update("cardTemplates", id, { sides: { ...design.sides, [side]: { ...design.sides[side], image: null, imageName: "" } }, updatedAt: new Date().toISOString() });
+  if (old) fs.rmSync(path.join(store.getDataDir(), old), { force: true });
+  return saved;
+});
+
+// The Lists catalog a design's cards come from (cached with the model).
+const cardCatalog = (cardFor) => listCatalog(cards.listKind(cardFor), "");
+
+ipcMain.handle("cards:fields", async (event, cardFor) => cards.fieldChoices(cardCatalog(cardFor)));
+
+// What a side's fields say for one person or household (the first one with a
+// Member ID when none is given), for the designer.
+ipcMain.handle("cards:values", async (event, id, side, ref) => {
+  const design = cardDesign(id);
+  const { model } = currentModel();
+  let refs = ref ? [ref] : [];
+  if (!refs.length) {
+    const first =
+      design.cardFor === "person"
+        ? model.people.find((p) => p.memberId && p.active) || model.people[0]
+        : model.households.find((h) => h.memberId && h.active) || model.households[0];
+    if (first) refs = [{ id: design.cardFor === "person" ? first.id : first.key }];
+  }
+  const { cat, records } = cards.recordsFor(cardCatalog(design.cardFor), refs);
+  if (!records.length) return { name: "", values: {} };
+  const r = records[0];
+  return {
+    ref: lists.recordRef(cat.kind, r),
+    name: design.cardFor === "person" ? r.p.name : r.h.name,
+    values: Object.fromEntries(cards.elementValues(model, cat, design.sides[side], r).map((el) => [el.id, el.value])),
+  };
+});
+
+ipcMain.handle("cards:printers", async () => {
+  const printers = await mainWindow.webContents.getPrintersAsync();
+  return printers.map((p) => p.name).sort();
+});
+
+ipcMain.handle("cards:set-printer", async (event, name) => {
+  store.updateSettings({ cardPrinter: String(name || "") });
+  return true;
+});
+
+// Prints one side of a design for people or households -- `refs` from Find,
+// or every record of a Lists `listState` -- or, with `pdf`, opens a PDF of
+// them (with the template image, to check where everything lands).
+ipcMain.handle("cards:print", async (event, { designId, side, refs, listState, pdf, reverse }) => {
+  const design = cardDesign(designId);
+  if (!cards.SIDES.includes(side)) throw new Error("Unknown side.");
+  const { model } = currentModel();
+  let wanted = refs || [];
+  if (listState) {
+    const { s, records } = runListState(listState);
+    if (s.kind !== cards.listKind(design.cardFor)) throw new Error(`${design.name} is a card for each ${design.cardFor}; this is a list of ${lists.KINDS[s.kind].toLowerCase()}.`);
+    wanted = records.map((r) => lists.recordRef(s.kind, r));
+  }
+  const { cat, records } = cards.recordsFor(cardCatalog(design.cardFor), wanted);
+  if (!records.length) throw new Error("There's no one to print a card for.");
+  if (!design.sides[side].elements.length && !design.sides[side].printImage && !pdf) throw new Error(`The ${side} has nothing on it to print yet.`);
+  const ordered = reverse ? records.slice().reverse() : records;
+  const html = cards.printHtml(
+    design,
+    side,
+    ordered.map((r) => cards.elementValues(model, cat, design.sides[side], r)),
+    { imageUrl: cardImageUrl(design.sides[side]), withImage: !!pdf, fonts: cardFontFaces() }
+  );
+  const file = path.join(os.tmpdir(), `membermanager-cards-${randomUUID()}.html`);
+  fs.writeFileSync(file, html, "utf8");
+  // Its only script is the shrink-to-fit in lib/cards.js; every value in it is escaped.
+  const win = new BrowserWindow({ show: false, webPreferences: { javascript: true, sandbox: true, contextIsolation: true } });
+  try {
+    await win.loadFile(file);
+    // The page has its fonts and has shrunk what doesn't fit (lib/cards.js).
+    await win.webContents.executeJavaScript("new Promise((resolve) => { const check = () => (document.body.dataset.ready ? resolve() : setTimeout(check, 20)); check(); })");
+    if (pdf) {
+      const data = await win.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true, margins: { marginType: "none" } });
+      const pdfFile = path.join(os.tmpdir(), `${design.name.replace(/[^\w -]+/g, "")} ${side} ${randomUUID().slice(0, 8)}.pdf`);
+      fs.writeFileSync(pdfFile, data);
+      await shell.openPath(pdfFile);
+      return { cards: records.length, pdf: pdfFile };
+    }
+    const { w, h } = cards.cardSize(design.orientation);
+    const printer = store.getSettings().cardPrinter || "";
+    const printed = await new Promise((resolve, reject) =>
+      win.webContents.print(
+        {
+          silent: !!printer,
+          deviceName: printer || undefined,
+          printBackground: true,
+          margins: { marginType: "none" },
+          landscape: design.orientation === "landscape",
+          pageSize: { width: Math.round(Math.min(w, h) * 1000), height: Math.round(Math.max(w, h) * 1000) },
+        },
+        (ok, reason) => (ok || /cancel/i.test(reason || "") ? resolve(ok) : reject(new Error(`The card printer said: ${reason}`)))
+      )
+    );
+    return { cards: printed ? records.length : 0 };
+  } finally {
+    win.destroy();
+    fs.rmSync(file, { force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

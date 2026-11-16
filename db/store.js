@@ -125,7 +125,7 @@ function setJournal(next) {
 
 // The collections a change may touch: what's in a data folder, and its
 // shared settings.
-const SHARED_COLLECTIONS = new Set(["contacts", "households", "orgs", "publications", "fields", "retired", "reviewDismissed", "settings"]);
+const SHARED_COLLECTIONS = new Set(["contacts", "households", "orgs", "publications", "fields", "retired", "reviewDismissed", "cardTemplates", "settings"]);
 
 const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
@@ -368,6 +368,7 @@ const LOCAL_SETTINGS = new Set([
   "gfFormTitle",
   "fundTrackFolder",
   "fundTrackChoices",
+  "cardPrinter",
 ]);
 
 const localSettingsPath = () => path.join(localDir, "local-settings.json");

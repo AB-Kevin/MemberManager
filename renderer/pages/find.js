@@ -130,8 +130,9 @@ window.Pages.find = {
         <div class="find-head">
           <div><div class="find-kind k-h">Household${c.fundTrack ? "" : " (address)"}</div><h2 class="find-name">${escapeHtml(c.name)} ${statusChip(c.status)}</h2>
             <div class="hint">${[c.memberId && `Member ID ${escapeHtml(c.memberId)}`, c.plan && escapeHtml(c.plan), c.type && escapeHtml(c.type)].filter(Boolean).join(" · ")}</div></div>
-          <div class="find-acts"><button class="btn secondary" type="button" data-members="${escapeHtml(c.memberId || (c.head?.name ?? c.name))}">Show on Members page</button></div>
+          <div class="find-acts"><button class="btn secondary" type="button" data-print-card="household">Print card…</button><button class="btn secondary" type="button" data-members="${escapeHtml(c.memberId || (c.head?.name ?? c.name))}">Show on Members page</button></div>
         </div>
+        <div id="find-card-print"></div>
         <div class="kv-grid">
           ${box("Phone", phone(c.phone))}
           ${box("Email", c.email)}
@@ -157,8 +158,9 @@ window.Pages.find = {
         <div class="find-head">
           <div><div class="find-kind k-p">Person</div><h2 class="find-name">${escapeHtml(c.name)} ${statusChip(c.status === "Inactive" ? "Inactive" : "")}</h2>
             <div class="hint">${[c.role, c.memberId && `Member ID ${c.memberId}`].filter(Boolean).map(escapeHtml).join(" · ")}</div></div>
-          <div class="find-acts"><button class="btn secondary" type="button" data-members="${escapeHtml(c.name)}">Show on Members page</button></div>
+          <div class="find-acts"><button class="btn secondary" type="button" data-print-card="person">Print card…</button><button class="btn secondary" type="button" data-members="${escapeHtml(c.name)}">Show on Members page</button></div>
         </div>
+        <div id="find-card-print"></div>
         <div class="kv-grid">
           ${box("Born", c.birth ? `${c.birth}${c.age != null ? ` (age ${c.age})` : ""}` : "", { copy: false })}
           ${box("Gender", c.gender, { copy: false })}
@@ -320,6 +322,11 @@ window.Pages.find = {
       if (membersOrg) {
         window.__contactsView = { tab: "orgs", searchTerm: membersOrg.dataset.membersOrg };
         navigate("contacts");
+        return;
+      }
+      const printCard = e.target.closest("[data-print-card]");
+      if (printCard && state.open) {
+        openCardPrint(qs("#find-card-print", card), { cardFor: printCard.dataset.printCard, refs: [{ k: state.open.k, id: state.open.id }] });
         return;
       }
       const print = e.target.closest("[data-print-church]");

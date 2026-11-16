@@ -6,6 +6,7 @@ A desktop app that keeps the office's member list in one place: everyone the off
 - **Members**: two editable spreadsheets, **People** and **Organizations**. Edits save as you go, and Ctrl+Z undoes them.
 - **Lists**: any list of people, households or churches, on any field and any conditions, to save as a spreadsheet, print, or keep for next time.
 - **Near ZIP**: how many members live within 10 to 100 miles of a ZIP code. Counts only, so it can be shared.
+- **Cards**: member cards for the card printer, designed on an SVG of the preprinted card, front and back.
 - **Fields**: the office's own fields, such as Committee, Over 65, Joined or District, for each person, each household or each organization. Add one in a few seconds from **Add field…** on the Members page, or from the **Fields** page.
 - **Import**: FundTrack's weekly exports (everyone in every household), a spreadsheet, new signups from the website's Gravity Forms signup form, or FormTracker's contacts. Any spreadsheet column can go into a field, or become a new one.
 - **Duplicates**: people, households and churches that might be the same, to merge or keep apart.
@@ -42,6 +43,21 @@ Pick **People**, **Households** or **Churches**, then add conditions on any fiel
 ## Near ZIP
 
 How many households and people live within 10, 25, 50, 75 and 100 miles of a ZIP code (up to 250), and a table of ZIP codes with their distance and counts, for active households or all of them, on any plan or one. Counts only: no names, phones or addresses, so its printout and spreadsheet can go to a hospital the office is contracting with. Distances are straight-line miles between ZIP code centre points (`lib/zip-locations.txt`, from the US Census Bureau's 2025 Gazetteer, public domain), not driving distance. A PO-box-only ZIP is placed at the nearest ZIP in its area and marked approximate.
+
+## Member cards
+
+The **Cards** page designs member cards for the card printer (the office's IDP SMART-51), printed on preprinted CR80 cards (85.6 × 54 mm).
+
+- **A design** is a card for **each household** or **each person**, landscape or portrait, with a **Front** and a **Back**. Each side has its own template image and its own fields, and is printed on its own: print a stack's fronts, then the same cards' backs.
+- **The template image** is an SVG of the preprinted card (**Choose template SVG…**), for placing fields on. It's only ever shown as a picture, so anything else in the file (scripts, links) never runs. It's kept in the data folder's `card-templates` folder. An image that isn't the card's shape is stretched to fit, with a warning.
+- **Fields:** any field Lists offers (name, Member ID, plan, phone, your own fields, FundTrack's details…) plus card-only ones: the spouse's name (the person in the household whose role is Spouse, still covered; blank when there's none, along with any text before it; on a person's card, the head for the spouse), the address on 2–3 lines or one, household members one per line (with or without birth dates), and today's date. **Add text** puts plain words on the card.
+- **Placing them:** drag a field to move it, and drag its right edge to set its width. With the card selected, the arrow keys move a field 0.5 mm (Shift: 2 mm) and Delete removes it. The panel sets position and size in millimetres, the font, size (pt), bold, italic, alignment, colour, **Capitals**, text before the value ("ID "), and **Shrink to fit**, which makes a long name smaller rather than cutting it off.
+- **Capitals:** names come from FundTrack in capitals, so name fields (names, head of household, spouse, household members, church contacts) print as **Names: First Letters**: "SHEILA R. GRABER" as "Sheila R. Graber", "GRABER-BRUCE" as "Graber-Bruce", "MCCOMBS" as "McCombs", and initials and "III" as they are. A word that already has small letters ("McDonald") is left alone. An initial gets a period if it hasn't one ("BRUCE L GRABER" prints as "Bruce L. Graber"), in ALL CAPITALS too; a letter at the very end of a name ("SMITH, J") is left as it is. Everything else prints **As entered**, so a Member ID or "PA" isn't changed, and any field can be set to **ALL CAPITALS**. The member list itself keeps names as they are, since SendNewsletters' envelopes and FormTracker use it too. The card shows a real member's values; **Show someone else…** picks whose. Changes save as you make them.
+- **Fonts:** Windows' usual ones, and **Atkinson Hyperlegible**, first in the list, which comes with MemberManager and draws its zero with a slash through it, so a 0 is never read as an O in a Member ID. It's embedded in every printed card and PDF, so the card printer's computer doesn't need it installed. (It's the Braille Institute's, under the SIL Open Font License, which travels with it in `node_modules/@fontsource/atkinson-hyperlegible`.)
+- **Only the fields print**, since the card is preprinted. **Print the image too** prints the template as well, for blank cards.
+- **Adjust position** moves everything on a side by up to 10 mm, for a printer that prints a little off. It's kept with the design, so measure with a test card once.
+- **Printing:** **Print card…** on a household's or person's card on Find, or **Print cards…** on Lists for everyone in the list, in the list's order. Choose the design and side. **Reverse order** is for feeding the printed stack back in for the other side, if your printer turns it over. **Preview as PDF** shows the cards with their template image, to check without using cards. On the Cards page, **Print a test card** prints the member shown, and **Card printer** chooses the printer: "Ask each time" opens Windows' print dialog; choosing the SMART-51 prints straight to it.
+- **Setting up the printer:** in the SMART-51 driver's printing preferences, set the card to CR80 and the orientation to match the design, and set black text to print with the resin black (K) panel, if your ribbon has one, for crisp text.
 
 ## Who's on it
 
@@ -171,5 +187,6 @@ The release appears as `MemberManager-Setup-X.Y.Z.exe` with its `.blockmap` and 
 - `lib/sensitiveColumns.js`: the identity and health columns that are never kept.
 - `lib/fundTrack.js`: FundTrack's exports: finding them, everyone in each household, the churches.
 - `lib/memberModel.js`, `lib/search.js`, `lib/lists.js`, `lib/nearZip.js` (with `zip-locations.txt`): Find, Lists and Near ZIP.
+- `lib/cards.js`: member card designs, their fields' values and the printable cards; `renderer/pages/cards.js` is the designer and `renderer/cardPrint.js` the print panel on Find and Lists.
 - `lib/team.js`: sharing a data folder between computers.
 - `renderer/`: the window (plain HTML/CSS/JS). `grid.js` is the spreadsheet; `pages/` has a file for each page.

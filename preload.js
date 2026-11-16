@@ -78,6 +78,20 @@ contextBridge.exposeInMainWorld("api", {
   printNear: (options) => invoke("near:print", options),
   copyText: (text) => invoke("clipboard:copy", text),
 
+  // Member cards.
+  listCardDesigns: () => invoke("cards:list"),
+  getCardDesign: (id) => invoke("cards:get", id),
+  createCardDesign: (input) => invoke("cards:create", input),
+  updateCardDesign: (id, patch) => invoke("cards:update", id, patch),
+  deleteCardDesign: (id) => invoke("cards:delete", id),
+  setCardImage: (id, side) => invoke("cards:set-image", id, side),
+  clearCardImage: (id, side) => invoke("cards:clear-image", id, side),
+  cardFields: (cardFor) => invoke("cards:fields", cardFor),
+  cardValues: (id, side, ref) => invoke("cards:values", id, side, ref),
+  cardPrinters: () => invoke("cards:printers"),
+  setCardPrinter: (name) => invoke("cards:set-printer", name),
+  printCards: (job) => invoke("cards:print", job),
+
   getSettings: () => invoke("settings:get"),
   setTheme: (theme) => invoke("settings:set-theme", theme),
 

@@ -16,6 +16,7 @@ window.Pages.lists = {
     let cat = null;
     let shown = 300;
     let colsOpen = false;
+    let lastTotal = 0;
 
     container.innerHTML = `
       <h1>Lists</h1>
@@ -47,10 +48,12 @@ window.Pages.lists = {
       <div class="row lists-top">
         <strong id="list-count"></strong><span class="hint" id="list-title"></span>
         <span class="toolbar-gap"></span>
+        <button class="btn secondary" type="button" id="list-cards">Print cards…</button>
         <button class="btn secondary" type="button" id="list-save-as">Save list as…</button>
         <button class="btn secondary" type="button" id="list-print">Print</button>
         <button class="btn" type="button" id="list-export">Save as spreadsheet…</button>
       </div>
+      <div id="list-card-print"></div>
       <div class="lists-table-wrap"><table class="lists-table" id="list-table"></table></div>
       <div id="list-more"></div>`;
 
@@ -155,6 +158,9 @@ window.Pages.lists = {
         return;
       }
       if (request !== runRequest || !document.body.contains(container.querySelector("#list-table"))) return;
+      lastTotal = r.total;
+      qs("#list-cards", container).disabled = state.kind === "churches";
+      qs("#list-cards", container).title = state.kind === "churches" ? "Cards are for households or people" : "";
       qs("#list-count", container).textContent = plural(r.total, state.kind === "people" ? "person" : state.kind === "households" ? "household" : "church", state.kind === "people" ? "people" : state.kind === "households" ? "households" : "churches");
       qs("#list-title", container).textContent = r.title;
       const mark = (k) => (state.sort === k ? (state.dir === -1 ? " ▼" : " ▲") : "");
@@ -279,6 +285,9 @@ window.Pages.lists = {
         toast(err.message, true);
       }
     });
+    qs("#list-cards", container).addEventListener("click", () =>
+      openCardPrint(qs("#list-card-print", container), { cardFor: state.kind === "people" ? "person" : "household", listState: JSON.parse(JSON.stringify(state)), count: lastTotal })
+    );
     qs("#list-save-as", container).addEventListener("click", () => {
       const bar = qs("#list-more", container);
       bar.innerHTML = `<div class="row panel list-save-row"><label class="lists-inline">Name <input type="text" id="list-save-name" maxlength="80" placeholder="e.g. 65 and over in Ohio" /></label>
