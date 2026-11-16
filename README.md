@@ -1,6 +1,6 @@
 # MemberManager
 
-A desktop app that keeps the office's member list in one place: everyone the office keeps in touch with, their households and churches, which newsletters they get, and any fields the office adds. FormTracker and SendNewsletters read their contacts from it, so a person is updated once rather than in each app.
+A desktop app that keeps the office's member list in one place: everyone the office keeps in touch with, their households and churches, which newsletters they get, and any fields the office adds. FormTracker and SendNewsletters read their contacts from it, so a person is updated once rather than in each app: SendNewsletters its whole mailing list, FormTracker every member (anyone with a Member ID) with this app's fields as its extra columns. Both pick up a save within seconds, while their host computer's app is open.
 
 - **Members**: two editable spreadsheets, **People** and **Organizations**. Edits save as you go, and Ctrl+Z undoes them.
 - **Fields**: the office's own fields, such as Committee, Over 65, Joined or District, for each person, each household or each organization. Add one in a few seconds from **Add field…** on the Members page, or from the **Fields** page.
