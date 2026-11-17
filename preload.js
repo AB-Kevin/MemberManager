@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("api", {
   updateField: (id, patch) => invoke("fields:update", id, patch),
   removeField: (id) => invoke("fields:remove", id),
   moveField: (id, direction) => invoke("fields:move", id, direction),
+  moveFieldToPeople: (id) => invoke("fields:to-people", id),
 
   // Bringing in SendNewsletters' list and FormTracker's contacts.
   migrationSources: () => invoke("migrate:sources"),

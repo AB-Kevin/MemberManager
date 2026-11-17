@@ -2425,6 +2425,46 @@ ipcMain.handle("fields:remove", async (event, id) => {
   return true;
 });
 
+// Makes a household field each person's own: everyone gets their household's
+// value (what the Members page already showed on their row), then the
+// households' copies go. The field keeps its id, so its column, values and
+// imports carry on under the same name. Saved lists of people and person
+// card designs that used it are re-pointed to it; lists and cards of
+// households no longer have it. Done in that order so a stop part way
+// never loses a value: the people have theirs before the households' go.
+ipcMain.handle("fields:to-people", async (event, id) => {
+  const fields = store.list("fields");
+  const field = fields.find((f) => f.id === id);
+  if (!field) throw new Error("That field is no longer there.");
+  if (field.appliesTo !== "household") throw new Error(`${field.label} isn't a household field.`);
+  Fields.cleanDefinition({ ...field, appliesTo: "contact" }, fields, id); // a person field of the same name already?
+  const { people, stranded } = Fields.householdToPeople(id, store.list("households"), store.list("contacts"));
+  const now = new Date().toISOString();
+  store.updateWhere("contacts", (c) => (people.has(c.id) ? { fields: mergeFields(c.fields, { [id]: people.get(c.id) }), updatedAt: now } : null));
+  const moved = store.update("fields", id, { appliesTo: "contact" });
+  store.updateWhere("households", (h) => (h.fields && id in h.fields ? { fields: mergeFields(h.fields, { [id]: null }), updatedAt: now } : null));
+
+  const from = `hf.${id}`;
+  const to = `pf.${id}`;
+  const savedLists = store.getSettings().savedLists || [];
+  const isPeopleList = (l) => (lists.KINDS[l.state?.kind] ? l.state.kind : "people") === "people";
+  const usesIt = (l) => JSON.stringify(l.state || {}).includes(`"${from}"`);
+  if (savedLists.some((l) => isPeopleList(l) && usesIt(l))) {
+    store.updateSettings({ savedLists: savedLists.map((l) => (isPeopleList(l) && usesIt(l) ? { ...l, state: lists.renameKey(l.state, from, to) } : l)) });
+  }
+  store.updateWhere("cardTemplates", (design) => {
+    if (design.cardFor !== "person" || !cards.SIDES.some((s) => design.sides?.[s]?.elements?.some((el) => el.key === from))) return null;
+    const sides = { ...design.sides };
+    for (const s of cards.SIDES) {
+      if (sides[s]?.elements) sides[s] = { ...sides[s], elements: sides[s].elements.map((el) => (el.key === from ? { ...el, key: to } : el)) };
+    }
+    return { sides, updatedAt: now };
+  });
+  const householdUses = savedLists.filter((l) => !isPeopleList(l) && usesIt(l)).length +
+    store.list("cardTemplates").filter((d) => d.cardFor !== "person" && cards.SIDES.some((s) => d.sides?.[s]?.elements?.some((el) => el.key === from))).length;
+  return { field: moved, people: people.size, stranded, householdUses };
+});
+
 // Moves a field one place up (-1) or down (1) among those for the same
 // level -- the order their columns appear in.
 ipcMain.handle("fields:move", async (event, id, direction) => {

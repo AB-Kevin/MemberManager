@@ -42,10 +42,14 @@ window.Pages.fields = {
     let usage = new Map();
     let builtInUsage = {};
     let canRemove = true;
+    let households = [];
+    let contacts = [];
 
     async function load() {
       const [list, settings] = await Promise.all([window.api.getList(), window.api.getSettings()]);
       fields = list.fields || [];
+      households = list.households;
+      contacts = list.contacts;
       // Removing a field takes its values off everyone, so while someone is
       // signed in to AB Apps only a manager can (main.js checks too).
       canRemove = !settings.abApps || settings.abApps.class === "manager";
@@ -99,6 +103,7 @@ window.Pages.fields = {
                       <td class="field-actions">
                         <button class="btn secondary" data-move="-1" type="button" ${i === 0 ? "disabled" : ""} title="Move its column left">↑</button>
                         <button class="btn secondary" data-move="1" type="button" ${i === mine.length - 1 ? "disabled" : ""} title="Move its column right">↓</button>
+                        ${level.value === "household" ? `<button class="btn secondary" data-to-people type="button" title="Give everyone in each household their own copy of its value">Make it a person field…</button>` : ""}
                         <button class="btn danger" data-remove type="button" ${canRemove ? "" : 'disabled title="Only a manager can remove a field"'}>Remove…</button>
                       </td>
                     </tr>`
@@ -189,6 +194,23 @@ window.Pages.fields = {
             await refresh();
           })
         );
+        qs("[data-to-people]", row)?.addEventListener("click", async () => {
+          const plan = F.householdToPeople(id, households, contacts);
+          const message =
+            `Make ${field.label} a field of each person's own, instead of the household's? Only this field moves; the other household fields stay as they are.` +
+            (plan.people.size ? `\n\nEveryone in a household that has it filled in gets their own copy of its value — ${plural(plan.people.size, "person", "people")} in all. After that, changing one person's leaves the others' as they are.` : "") +
+            (plan.stranded ? `\n\n${plural(plan.stranded, "household")} with a value ${plan.stranded === 1 ? "has" : "have"} no one in ${plan.stranded === 1 ? "it" : "them"}, so ${plan.stranded === 1 ? "that value is" : "those values are"} dropped.` : "") +
+            "\n\nSaved lists of people and person cards that use it keep it; lists and cards of households lose it. A FormTracker or SendNewsletters template or filter that reads it from the household will find it blank." +
+            "\n\nThere's no button to move it back.";
+          if (!(await confirmAction(message, "Make it a person field"))) return;
+          try {
+            const result = await window.api.moveFieldToPeople(id);
+            toast(`${field.label} is a person field now${result.people ? `, filled in for ${plural(result.people, "person", "people")}` : ""}.` + (result.householdUses ? ` ${plural(result.householdUses, "household list or card", "household lists or cards")} used it and won't show it now.` : ""));
+          } catch (err) {
+            toast(err.message, true);
+          }
+          await refresh();
+        });
         qs("[data-remove]", row).addEventListener("click", async () => {
           const used = usage.get(id) || 0;
           const message =

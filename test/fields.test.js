@@ -127,3 +127,39 @@ test("identifier and yes/no columns aren't guessed as a church, and a church col
   assert.equal(mapping.ZIP, "zip");
   assert.equal(mapping.AccountsPKID, "");
 });
+
+// ---- moving a household field to people ----
+
+test("a household field moved to people gives everyone their household's value", () => {
+  const households = [
+    { id: "h1", fields: { over65: true } },
+    { id: "h2", fields: { over65: false } },
+    { id: "h3", fields: {} },
+    { id: "h4", fields: { over65: true } }, // no one lives here
+  ];
+  const contacts = [
+    { id: "c1", householdId: "h1", fields: {} },
+    { id: "c2", householdId: "h1" },
+    { id: "c3", householdId: "h2", fields: {} },
+    { id: "c4", householdId: "h3", fields: {} },
+    { id: "c5", householdId: null, fields: {} },
+  ];
+  const plan = Fields.householdToPeople("over65", households, contacts);
+  assert.deepEqual([...plan.people], [["c1", true], ["c2", true], ["c3", false]], "No is a value too; a blank isn't");
+  assert.equal(plan.households, 3);
+  assert.equal(plan.stranded, 1);
+});
+
+test("a saved list's field key is renamed in its conditions, columns and sort", () => {
+  const { renameKey } = require("../lib/lists");
+  const state = { kind: "people", conds: [{ k: "hf.x", op: "yes" }, { k: "p.name", op: "has", v: "A" }], match: "all", cols: ["p.name", "hf.x"], sort: "hf.x", dir: 1 };
+  assert.deepEqual(renameKey(state, "hf.x", "pf.x"), {
+    kind: "people",
+    conds: [{ k: "pf.x", op: "yes" }, { k: "p.name", op: "has", v: "A" }],
+    match: "all",
+    cols: ["p.name", "pf.x"],
+    sort: "pf.x",
+    dir: 1,
+  });
+  assert.deepEqual(renameKey({ kind: "people", conds: [] }, "hf.x", "pf.x"), { kind: "people", conds: [] }, "no columns or sort stays none");
+});
