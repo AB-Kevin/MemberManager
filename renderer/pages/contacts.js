@@ -17,9 +17,10 @@
 // is "covered" for it: those cells are hatched, and they don't need their
 // own copy -- though they can have one.
 //
-// Columns can be dragged into another order by their headings, and pinned at
-// the left to stay in view while the rest scroll (lib/columnLayout.js). How
-// they're arranged is kept for each tab on this computer.
+// Columns can be dragged into another order by their headings, pinned at
+// the left to stay in view while the rest scroll, and made wider or narrower
+// by a heading's right edge (lib/columnLayout.js). How they're arranged is
+// kept for each tab on this computer.
 
 const ADDRESS_COLUMNS = [
   { key: "addressLine1", label: "Address", width: 200 },
@@ -782,7 +783,13 @@ window.Pages.contacts = {
         viewChanged();
       },
       onSelectionChange: renderSelectionBar,
-      onMoveColumns: (keys, target, pinned) => saveColumnLayout(L.layoutOf(L.move(arrangedColumns(), keys, target, pinned))),
+      onMoveColumns: (keys, target, pinned) => saveColumnLayout(L.layoutOf(L.move(arrangedColumns(), keys, target, pinned), usualColumns())),
+      onResizeColumn: (key, width) => {
+        const columns = arrangedColumns();
+        const col = columns.find((c) => c.key === key);
+        if (col) col.width = width;
+        saveColumnLayout(L.layoutOf(columns, usualColumns()));
+      },
       emptyHtml: () =>
         tab === "orgs"
           ? orgs.size
@@ -811,7 +818,7 @@ window.Pages.contacts = {
       const hint = qs("#column-hint", container);
       if (!hint) return;
       hint.innerHTML =
-        "Drag a column's heading to move it; drop it among the columns at the left (or on the checkbox column) to keep it in view while the rest scroll." +
+        "Drag a column's heading to move it, or its right edge to make it wider (double-click the edge to fit); drop a heading among the columns at the left (or on the checkbox column) to keep it in view while the rest scroll." +
         (columnLayouts[tab] ? ' <a href="#" data-reset-columns>Put the columns back as they were</a>.' : "");
     }
 

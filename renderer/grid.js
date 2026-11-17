@@ -12,6 +12,7 @@
 //     onUndo(), onSort(col), onSelectionChange(), emptyHtml(),
 //     onToggle(rowId, col), // a cell with `toggle` ("open" or "closed") was clicked, or Enter/Space pressed on it
 //     onMoveColumns(keys, target, pinned), // a heading was dragged; see "moving columns" below
+//     onResizeColumn(key, width), // a heading's right edge was dragged, or double-clicked to fit
 //   });
 //   sheet.setView(rows) // [{ id, groupStart, groupSize, indexInGroup, className }] in display order
 //
@@ -27,7 +28,9 @@
 // With `onMoveColumns`, headings can be dragged to move their columns
 // (lib/columnLayout.js does the moving), and dropped among the pinned
 // columns at the left -- or on the checkbox column -- to stay in view while
-// the rest scroll. Columns under one heading move together.
+// the rest scroll. Columns under one heading move together. With
+// `onResizeColumn`, a heading's right edge can be dragged to change its
+// column's width, or double-clicked to fit what's in view.
 //
 // Only the rows in view are in the DOM at any time -- every row is the same
 // height, so which ones are in view falls out of the scroll position -- which
@@ -73,18 +76,25 @@
 
     // ---- header ----
 
-    function setColumns(next) {
-      if (editor) commitEdit();
-      columns = next;
+    // Where each column starts, from the widths; returns the table's width.
+    function placeColumns() {
       let offset = SELECT_COL_WIDTH;
       for (const col of columns) {
         col.offset = offset;
         offset += col.width;
       }
       stickyWidth = SELECT_COL_WIDTH + columns.filter((c) => c.sticky).reduce((total, c) => total + c.width, 0);
+      return offset;
+    }
+
+    function setColumns(next) {
+      if (editor) commitEdit();
+      columns = next;
+      const offset = placeColumns();
       const pinned = columns.filter((c) => c.sticky);
       const movable = !!config.onMoveColumns;
       const dragAttr = movable ? 'draggable="true"' : "";
+      const resizer = config.onResizeColumn ? '<span class="col-resize" title="Drag to change its width; double-click to fit"></span>' : "";
       columns.forEach((c) => (c.stickyLast = c === pinned[pinned.length - 1]));
       table.style.width = `${offset}px`;
       qs("colgroup", table).innerHTML =
@@ -100,7 +110,7 @@
           let span = 1;
           while (col.header && columns[i + span]?.header === col.header) span++;
           const groupDrag = col.header && movable ? `${dragAttr} data-group-key="${escapeHtml(col.key)}" title="Drag to move ${escapeHtml(col.header)}'s columns"` : "";
-          groupRow += `<th colspan="${span}" class="${col.sticky ? "sticky" : ""} ${col.header ? "group-head" : ""}" ${stickyStyle(col)} ${groupDrag}>${escapeHtml(col.header || "")}</th>`;
+          groupRow += `<th colspan="${span}" data-first-key="${escapeHtml(col.key)}" class="${col.sticky ? "sticky" : ""} ${col.header ? "group-head" : ""}" ${stickyStyle(col)} ${groupDrag}>${escapeHtml(col.header || "")}</th>`;
           i += span - 1;
         }
         groupRow += "</tr>";
@@ -112,7 +122,7 @@
             .map(
               (col) =>
                 `<th data-key="${escapeHtml(col.key)}" class="${col.sticky ? "sticky" : ""} ${col.stickyLast ? "sticky-last" : ""} ${col.type === "count" ? "num" : ""} ${col.type === "flag" ? "flag" : ""} ${col.group ? "group-col" : ""} ${col.header ? "under-group" : ""}"
-                  ${stickyStyle(col)} ${dragAttr} title="${escapeHtml((col.title || `Sort by ${col.label}`) + (movable ? " (drag to move)" : ""))}">${escapeHtml(col.label)}<span class="sort-mark"></span></th>`
+                  ${stickyStyle(col)} ${dragAttr} title="${escapeHtml((col.title || `Sort by ${col.label}`) + (movable ? " (drag to move)" : ""))}">${escapeHtml(col.label)}<span class="sort-mark"></span>${resizer}</th>`
             )
             .join("")}
         </tr>`;
@@ -570,6 +580,7 @@
         renderBody(true);
         return;
       }
+      if (e.target.closest(".col-resize") || justResized) return;
       const th = e.target.closest("th[data-key]");
       if (th) config.onSort?.(colByKey(th.dataset.key));
     });
@@ -652,6 +663,10 @@
     }
 
     thead.addEventListener("dragstart", (e) => {
+      if (resizing) {
+        e.preventDefault();
+        return;
+      }
       const th = e.target.closest?.("th[draggable]");
       if (!th || !config.onMoveColumns) return;
       if (editor) commitEdit();
@@ -686,6 +701,68 @@
     });
     // Dropped somewhere else, or Esc.
     thead.addEventListener("dragend", endDrag);
+
+    // ---- column widths ----
+
+    let resizing = null; // { key, startX, startWidth } -- whose right edge is being dragged
+    let justResized = false; // the click that ends a drag isn't a click on the heading
+
+    // Redraws the widths without redrawing the rows, while the edge moves.
+    function showWidths() {
+      table.style.width = `${placeColumns()}px`;
+      const cols = qsa("colgroup col", table);
+      columns.forEach((col, i) => (cols[i + 1].style.width = `${col.width}px`));
+      qsa("th.sticky[data-key], td.sticky[data-key]", table).forEach((el) => (el.style.left = `${colByKey(el.dataset.key).offset}px`));
+      qsa("th.sticky[data-first-key]", thead).forEach((el) => (el.style.left = `${colByKey(el.dataset.firstKey).offset}px`));
+    }
+
+    function onResizeMove(e) {
+      const col = colByKey(resizing.key);
+      if (!col) return;
+      col.width = ColumnLayout.clampWidth(resizing.startWidth + e.clientX - resizing.startX);
+      showWidths();
+    }
+
+    function onResizeEnd() {
+      window.removeEventListener("mousemove", onResizeMove);
+      window.removeEventListener("mouseup", onResizeEnd);
+      document.body.classList.remove("col-resizing");
+      const { key, startWidth } = resizing;
+      resizing = null;
+      justResized = true;
+      setTimeout(() => (justResized = false), 0);
+      const col = colByKey(key);
+      if (col && col.width !== startWidth) config.onResizeColumn(key, col.width);
+    }
+
+    thead.addEventListener("mousedown", (e) => {
+      const handle = e.target.closest(".col-resize");
+      if (!handle) return;
+      e.preventDefault();
+      if (editor) commitEdit();
+      const key = handle.closest("th").dataset.key;
+      resizing = { key, startX: e.clientX, startWidth: colByKey(key).width };
+      document.body.classList.add("col-resizing");
+      window.addEventListener("mousemove", onResizeMove);
+      window.addEventListener("mouseup", onResizeEnd);
+    });
+
+    // Double-clicking the edge fits the column to its heading and the rows in view.
+    thead.addEventListener("dblclick", (e) => {
+      const handle = e.target.closest(".col-resize");
+      if (!handle) return;
+      const th = handle.closest("th");
+      const key = th.dataset.key;
+      const range = document.createRange();
+      const contentWidth = (el) => {
+        range.selectNodeContents(el);
+        const style = getComputedStyle(el);
+        return range.getBoundingClientRect().width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2;
+      };
+      const cells = [th, ...qsa(`td[data-key="${CSS.escape(key)}"]`, body)];
+      const width = ColumnLayout.clampWidth(Math.ceil(Math.max(...cells.map(contentWidth))));
+      if (width !== colByKey(key).width) config.onResizeColumn(key, width);
+    });
 
     scroll.addEventListener("scroll", () => renderBody());
     const onResize = () => {

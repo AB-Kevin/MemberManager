@@ -488,6 +488,17 @@ th.num, td.num { text-align: right; }
 /* The last pinned column gets a heavier edge, so rows sliding under it read as such. */
 .sheet .sticky-last { border-right-color: var(--gray-400); }
 .sheet .sel-col { text-align: center; padding: 0; }
+/* A heading's right edge, dragged to change its column's width. */
+.sheet thead th .col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+}
+.sheet thead th .col-resize:hover, body.col-resizing .sheet thead th .col-resize:active { background: var(--accent-text); opacity: 0.5; }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none; }
 /* Dragging a heading to move its columns. */
 .sheet thead th.col-dragging { opacity: 0.45; }
 .sheet-scroll.drop-pinned .sheet thead th.sticky:not(.sel-col) { background: var(--green-100); }
@@ -656,6 +667,8 @@ th.num, td.num { text-align: right; }
 .fields-table td { vertical-align: middle; }
 .fields-table .field-actions { white-space: nowrap; text-align: right; }
 .fields-table .field-actions .btn { margin-left: 4px; }
+.fields-table tr.built-in-field td { height: 38px; }
+.fields-table tr.built-in-field td .hint { margin: 2px 0 0; font-size: 12px; }
 .new-field-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .new-field-form input[type=text] { width: 180px; }
 

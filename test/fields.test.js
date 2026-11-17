@@ -52,6 +52,10 @@ test("identity and health columns are recognized", () => {
   assert.ok(isSensitive("Last 4 SSN"));
   assert.ok(isSensitive("HasPreExistingCondition"));
   assert.ok(!isSensitive("Over 65"));
+  // Whether a household is exempt is kept; the number itself never is.
+  assert.ok(!isSensitive("SocialSecurityExempt"));
+  assert.ok(!isSensitive("HasSSNExemption"));
+  assert.ok(isSensitive("Social Security Number"));
 });
 
 // ---- imports into fields ----

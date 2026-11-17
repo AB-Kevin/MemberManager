@@ -172,10 +172,17 @@ test("churches: matched by id or name, contacts and blanks filled in, and a chur
   assert.deepEqual(plan.inserts.map((o) => o.name), ["Pine Hill"], "an inactive church new to the list isn't added");
 });
 
-test("the fields the import needs are made once, as person and church fields", () => {
+test("the fields the import needs are made once, as person, household and church fields", () => {
   const missing = ft.missingFields([{ id: "x", label: "phone", appliesTo: "contact", type: "text" }]);
   assert.deepEqual(
     missing.map((f) => `${f.label}/${f.appliesTo}`),
-    ["Plan/contact", "Household type/contact", "Birth date/contact", "Role/contact", "Gender/contact", "Code/org", "Denomination/org", "Organization type/org", "Phone/org"]
+    ["Plan/contact", "Household type/contact", "Social Security exempt/household", "Birth date/contact", "Role/contact", "Gender/contact", "Code/org", "Denomination/org", "Organization type/org", "Phone/org"]
   );
+  assert.equal(missing.find((f) => f.appliesTo === "household").type, "yesno");
+});
+
+test("a field already made under a differently written name isn't made again", () => {
+  const existing = [{ id: "s", label: "SocialSecurityExempt", appliesTo: "household", type: "yesno" }];
+  assert.ok(!ft.missingFields(existing).some((f) => f.appliesTo === "household"));
+  assert.equal(ft.fieldIndex(existing).household[ft.labelKey("Social Security exempt")].id, "s");
 });

@@ -1673,17 +1673,23 @@ function readFundTrack(folder) {
 
 // The households' import (lib/listImport.js), set up for MemberGroups: the
 // membership export's mapping, plus Phone, Plan and Household type on the
-// head.
+// head, and whether the household is exempt from Social Security.
 function fundTrackHouseholdImport(groups, fields, plan, publications) {
   const preset = membershipPreset(groups.headers, groups.rows, publications);
   if (!preset) throw new Error("The MemberGroups export doesn't have the columns MemberManager expects (GroupCode, MemberGroupUID, PrimaryAddressLine1, statusTerm, fundName).");
   const index = fundTrack.fieldIndex(fields);
-  // The account's own fields, on its head (lib/fundTrack.js).
-  const target = (label, column) => {
-    const field = index.contact[label.toLowerCase()];
+  // The account's own fields, on its head, and its household's (lib/fundTrack.js).
+  const target = (label, column, level = "contact") => {
+    const field = index[level][fundTrack.labelKey(label)];
     return field ? { [column]: `field:${field.id}` } : {};
   };
-  const mapping = withoutSensitive({ ...preset.mapping, ...target("Phone", "PrimaryPhone"), ...target("Plan", "fundName"), ...target("Household type", "GroupType") });
+  const mapping = withoutSensitive({
+    ...preset.mapping,
+    ...target("Phone", "PrimaryPhone"),
+    ...target("Plan", "fundName"),
+    ...target("Household type", "GroupType"),
+    ...target("Social Security exempt", "HasSSNExemption", "household"),
+  });
   const base = { ...preset.options, mode: "person", defaultCopies: "1", addInactive: true, sourceBatch: `FundTrack ${new Date().toLocaleDateString()}` };
   return {
     mapping,
@@ -1857,7 +1863,7 @@ ipcMain.handle("import:preview", async (event, source) => {
     samples: Object.fromEntries(headers.map((h) => [h, listImport.sampleValues(rows, h, 3)])),
     // What kind of field each column would make, from more of its values.
     typeGuesses: Object.fromEntries(headers.map((h) => [h, Fields.guessType(listImport.sampleValues(rows, h, 60))])),
-    mapping: withoutSensitive(membership ? membership.mapping : guessWithFields(headers, rows, publications, fields)),
+    mapping: withoutSensitive(matchFields(headers, membership ? membership.mapping : listImport.guessMapping(headers, rows, publications), fields)),
     membership,
     targets: listImport.importTargets(publications, fields),
     fields,
@@ -1870,20 +1876,23 @@ ipcMain.handle("import:preview", async (event, source) => {
 });
 
 // A column headed with a field's name goes to that field ("Over 65" to the
-// Over 65 field), unless it's plainly one of the built-in ones.
-function guessWithFields(headers, rows, publications, fields) {
-  const mapping = listImport.guessMapping(headers, rows, publications);
-  const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, "");
-  const used = new Set();
+// Over 65 field, "SocialSecurityExempt" to Social Security exempt), unless
+// it's already going somewhere -- one of the built-in ones, say. The
+// membership software's other name for the exemption finds it too.
+const COLUMN_ALIASES = { hasssnexemption: "socialsecurityexempt" };
+function matchFields(headers, mapping, fields) {
+  const out = { ...mapping };
+  const used = new Set(Object.values(out));
   for (const header of headers) {
-    if (mapping[header]) continue;
-    const field = fields.find((f) => norm(f.label) === norm(header) && !used.has(f.id));
+    if (out[header]) continue;
+    const key = COLUMN_ALIASES[fundTrack.labelKey(header)] || fundTrack.labelKey(header);
+    const field = fields.find((f) => fundTrack.labelKey(f.label) === key && !used.has(`field:${f.id}`));
     if (field) {
-      mapping[header] = `field:${field.id}`;
-      used.add(field.id);
+      out[header] = `field:${field.id}`;
+      used.add(`field:${field.id}`);
     }
   }
-  return mapping;
+  return out;
 }
 
 // Identity and health columns (lib/sensitiveColumns.js) are never brought
@@ -2455,7 +2464,10 @@ ipcMain.handle("settings:set-member-columns", async (event, tab, layout) => {
   if (!["people", "orgs"].includes(tab)) throw new Error("Unknown tab.");
   if (layout !== null && !ColumnLayout.isLayout(layout)) throw new Error("That column layout couldn't be read.");
   const all = { ...(store.getSettings().memberColumns || {}) };
-  if (layout) all[tab] = { order: layout.order, pinned: layout.pinned };
+  if (layout) {
+    const widths = Object.fromEntries(Object.entries(layout.widths || {}).map(([key, width]) => [key, ColumnLayout.clampWidth(width)]));
+    all[tab] = { order: layout.order, pinned: layout.pinned, widths };
+  }
   else delete all[tab];
   store.updateSettings({ memberColumns: all });
   return all;

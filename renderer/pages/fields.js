@@ -4,13 +4,43 @@
 // organization: add one, rename it, change what kind it is, move it, or
 // remove it. Each is a column on the Members page, comes and goes with
 // imports and exports under its name, and is what FormTracker's templates
-// and filters and SendNewsletters' filters see.
+// and filters and SendNewsletters' filters see. The fields every record has
+// (name, email, address, Member ID...) are listed above them, to see how
+// many records have each filled in; they can't be changed here.
+
+const BUILT_IN_FIELDS = {
+  contact: [
+    { key: "name", label: "Name", kind: "Text" },
+    { key: "orgId", label: "Organization", kind: "Choice", note: "The church or organization they belong to" },
+    { key: "email", label: "Email address", kind: "Text" },
+    { key: "memberId", label: "Member ID", kind: "Text", note: "From the membership software — imports match people on it. Only members have one." },
+    { key: "memberStatus", label: "Status", kind: "Choice", note: "Active or Inactive, from the membership export" },
+  ],
+  household: [
+    { key: "addressLine1", label: "Address", kind: "Text" },
+    { key: "addressLine2", label: "Address 2", kind: "Text" },
+    { key: "city", label: "City", kind: "Text" },
+    { key: "state", label: "State", kind: "Text" },
+    { key: "zip", label: "ZIP", kind: "Text" },
+  ],
+  org: [
+    { key: "name", label: "Name", kind: "Text" },
+    { key: "attn", label: "Attention", kind: "Text", note: "Who batches are addressed to — a church rep, say" },
+    { key: "email", label: "Email address", kind: "Text" },
+    { key: "addressLine1", label: "Address", kind: "Text" },
+    { key: "addressLine2", label: "Address 2", kind: "Text" },
+    { key: "city", label: "City", kind: "Text" },
+    { key: "state", label: "State", kind: "Text" },
+    { key: "zip", label: "ZIP", kind: "Text" },
+  ],
+};
 
 window.Pages.fields = {
   async render(container) {
     const F = window.Fields;
     let fields = [];
     let usage = new Map();
+    let builtInUsage = {};
     let canRemove = true;
 
     async function load() {
@@ -20,6 +50,10 @@ window.Pages.fields = {
       // signed in to AB Apps only a manager can (main.js checks too).
       canRemove = !settings.abApps || settings.abApps.class === "manager";
       const records = { contact: list.contacts, household: list.households, org: list.orgs };
+      const filled = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+      builtInUsage = Object.fromEntries(
+        Object.entries(BUILT_IN_FIELDS).map(([level, defs]) => [level, Object.fromEntries(defs.map((d) => [d.key, records[level].filter((r) => filled(r[d.key])).length]))])
+      );
       usage = new Map(
         fields.map((f) => [f.id, records[f.appliesTo].filter((r) => r.fields && r.fields[f.id] !== undefined && r.fields[f.id] !== null && r.fields[f.id] !== "").length])
       );
@@ -33,23 +67,35 @@ window.Pages.fields = {
       org: "Each church or organization's own — a district, a contact phone.",
     };
 
+    const filledText = (level, n) =>
+      plural(n, level === "contact" ? "person" : level === "household" ? "household" : "organization", level === "contact" ? "people" : undefined);
+
     function section(level) {
       const mine = fields.filter((f) => f.appliesTo === level.value);
+      const builtIn = BUILT_IN_FIELDS[level.value]
+        .map(
+          (d) => `
+            <tr class="built-in-field">
+              <td>${escapeHtml(d.label)}${d.note ? `<div class="hint">${escapeHtml(d.note)}</div>` : ""}</td>
+              <td>${escapeHtml(d.kind)}</td>
+              <td class="hint">${filledText(level.value, builtInUsage[level.value][d.key])}</td>
+              <td class="field-actions hint" title="Every ${escapeHtml(level.label.toLowerCase())} has this field; it can't be renamed or removed">Built in</td>
+            </tr>`
+        )
+        .join("");
       return `
         <div class="panel">
           <h2 style="margin-top:0">${escapeHtml(level.plural)}</h2>
           <p class="hint" style="margin-top:0">${escapeHtml(LEVEL_TEXT[level.value])}</p>
-          ${
-            mine.length
-              ? `<table class="fields-table">
+          <table class="fields-table">
                   <thead><tr><th>Name</th><th>Kind</th><th>Filled in</th><th></th></tr></thead>
-                  <tbody>${mine
+                  <tbody>${builtIn}${mine
                     .map(
                       (f, i) => `
                     <tr data-id="${f.id}">
                       <td><input type="text" class="field-label" value="${escapeHtml(f.label)}" maxlength="${F.MAX_LABEL}" aria-label="Name" /></td>
                       <td><select class="field-type" aria-label="Kind">${F.TYPES.map((t) => `<option value="${t.value}" ${t.value === f.type ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}</select></td>
-                      <td class="hint">${plural(usage.get(f.id) || 0, level.value === "contact" ? "person" : level.value === "household" ? "household" : "organization", level.value === "contact" ? "people" : undefined)}</td>
+                      <td class="hint">${filledText(level.value, usage.get(f.id) || 0)}</td>
                       <td class="field-actions">
                         <button class="btn secondary" data-move="-1" type="button" ${i === 0 ? "disabled" : ""} title="Move its column left">↑</button>
                         <button class="btn secondary" data-move="1" type="button" ${i === mine.length - 1 ? "disabled" : ""} title="Move its column right">↓</button>
@@ -58,17 +104,17 @@ window.Pages.fields = {
                     </tr>`
                     )
                     .join("")}</tbody>
-                </table>`
-              : `<p class="hint">No ${escapeHtml(level.label.toLowerCase())} fields yet.</p>`
-          }
+          </table>
+          ${mine.length ? "" : `<p class="hint">No ${escapeHtml(level.label.toLowerCase())} fields of your own yet.</p>`}
         </div>`;
     }
 
     function render() {
       container.innerHTML = `
         <h1>Fields</h1>
-        <p class="subtitle">Your own fields, on top of the name, email, address and Member ID everyone has. Each is a column on the Members page, filled in there
-          by typing or pasting, or by an import (a column headed with a field's name goes into it). FormTracker and SendNewsletters see them too.</p>
+        <p class="subtitle">Every field a person, household and organization has. The built-in ones — name, email, address, Member ID and so on — are always there;
+          your own come after them. Each is a column on the Members page, filled in there by typing or pasting, or by an import (a column headed with a field's
+          name goes into it). FormTracker and SendNewsletters see them too.</p>
         <div class="panel">
           <h2 style="margin-top:0">Add a field</h2>
           <div class="field-add">

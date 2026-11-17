@@ -87,3 +87,18 @@ test("a layout that isn't one is ignored", () => {
   assert.equal(L.isLayout({ order: [1], pinned: [] }), false);
   assert.deepEqual(keys(L.apply(usual(), { order: "nope" })), keys(usual()));
 });
+
+test("a column made wider keeps its width; the rest keep their usual ones", () => {
+  const sized = usual().map((c) => ({ ...c, width: 100 }));
+  const arranged = L.apply(sized, undefined);
+  arranged.find((c) => c.key === "city").width = 260;
+  const layout = L.layoutOf(arranged, sized);
+  assert.deepEqual(layout.widths, { city: 260 });
+  const columns = L.apply(sized, layout);
+  assert.equal(columns.find((c) => c.key === "city").width, 260);
+  assert.equal(columns.find((c) => c.key === "email").width, 100);
+  // A width saved out of bounds is brought back within them.
+  assert.equal(L.apply(sized, { ...layout, widths: { city: 5 } }).find((c) => c.key === "city").width, L.MIN_WIDTH);
+  assert.equal(L.isLayout({ ...layout, widths: { city: "wide" } }), false);
+  assert.equal(L.isLayout({ ...layout, widths: [] }), false);
+});
