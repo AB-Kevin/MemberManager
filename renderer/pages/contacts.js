@@ -16,6 +16,10 @@
 // for its members. A person whose organization gets a newsletter as a batch
 // is "covered" for it: those cells are hatched, and they don't need their
 // own copy -- though they can have one.
+//
+// Columns can be dragged into another order by their headings, and pinned at
+// the left to stay in view while the rest scroll (lib/columnLayout.js). How
+// they're arranged is kept for each tab on this computer.
 
 const ADDRESS_COLUMNS = [
   { key: "addressLine1", label: "Address", width: 200 },
@@ -48,6 +52,8 @@ window.Pages.contacts = {
     }
     await loadList();
     const F = window.Fields;
+    const L = window.ColumnLayout;
+    let columnLayouts = (await window.api.getSettings()).memberColumns || {};
 
     // Tab, search, filter and sort survive leaving the page and coming back.
     // Another page can open this one already filtered by setting
@@ -132,7 +138,7 @@ window.Pages.contacts = {
     }
 
     function publicationColumns(forOrgs) {
-      return visiblePublications().flatMap((p) => [
+      return publications.flatMap((p) => [
         { key: `email:${p.id}`, label: "Email", header: p.name, width: 58, type: "flag", title: `${forOrgs ? "Gets" : "Gets their own"} ${p.name} by email` },
         { key: `mail:${p.id}`, label: "Mail", header: p.name, width: 58, type: "flag", group: !forOrgs, title: forOrgs ? `Gets ${p.name} as a batch by mail` : `This address gets ${p.name} by mail` },
         { key: `copies:${p.id}`, label: "Copies", header: p.name, width: 70, type: "count", group: !forOrgs, title: `How many copies of ${p.name} go there` },
@@ -156,7 +162,19 @@ window.Pages.contacts = {
         }));
     }
 
+    // Every column of this tab, arranged as they've been dragged; those of
+    // newsletters a filter hides are still here, so they keep their places.
+    function arrangedColumns() {
+      return L.apply(usualColumns(), columnLayouts[tab]);
+    }
+
     function columnsFor() {
+      const hidden = new Set(publications.filter((p) => !visiblePublications().includes(p)).map((p) => p.id));
+      return arrangedColumns().filter((c) => !(/^(email|mail|copies):/.test(c.key) && hidden.has(c.key.split(":")[1])));
+    }
+
+    // The columns in their usual order.
+    function usualColumns() {
       if (tab === "orgs") {
         return [
           { key: "name", label: "Organization", width: 220, sticky: true },
@@ -764,6 +782,7 @@ window.Pages.contacts = {
         viewChanged();
       },
       onSelectionChange: renderSelectionBar,
+      onMoveColumns: (keys, target, pinned) => saveColumnLayout(L.layoutOf(L.move(arrangedColumns(), keys, target, pinned))),
       emptyHtml: () =>
         tab === "orgs"
           ? orgs.size
@@ -772,6 +791,43 @@ window.Pages.contacts = {
           : contacts.length
           ? "No one matches the search or filter."
           : `The member list is empty. <a href="#" data-empty-settings>Bring in SendNewsletters' list</a> (in Settings), <a href="#" data-empty-import>import a spreadsheet, the membership export or the signup form</a>, or use <strong>Add person</strong> to type people in.`,
+    });
+
+    // ---- arranging the columns ----
+
+    async function saveColumnLayout(layout) {
+      const forTab = tab;
+      columnLayouts = { ...columnLayouts, [forTab]: layout };
+      sheet.setColumns(columnsFor());
+      renderColumnHint();
+      try {
+        await window.api.setMemberColumns(forTab, layout);
+      } catch (err) {
+        toast(`Couldn't keep the columns that way for next time: ${err.message}`, true);
+      }
+    }
+
+    function renderColumnHint() {
+      const hint = qs("#column-hint", container);
+      if (!hint) return;
+      hint.innerHTML =
+        "Drag a column's heading to move it; drop it among the columns at the left (or on the checkbox column) to keep it in view while the rest scroll." +
+        (columnLayouts[tab] ? ' <a href="#" data-reset-columns>Put the columns back as they were</a>.' : "");
+    }
+
+    qs("#sheet-help", container).addEventListener("click", async (e) => {
+      if (!e.target.closest("[data-reset-columns]")) return;
+      e.preventDefault();
+      const forTab = tab;
+      columnLayouts = { ...columnLayouts };
+      delete columnLayouts[forTab];
+      sheet.setColumns(columnsFor());
+      renderColumnHint();
+      try {
+        await window.api.setMemberColumns(forTab, null);
+      } catch (err) {
+        toast(`Couldn't put the columns back for next time: ${err.message}`, true);
+      }
     });
 
     // ---- selection bar ----
@@ -1019,6 +1075,8 @@ window.Pages.contacts = {
             "Click the arrow by a Members count to list them underneath: their rows work as on the People tab — their own Email, and their household's Mail and Copies (tinted when others live there too)."
           : "Click a cell, then type or double-click to change it; Enter and Tab move on, Esc cancels, Ctrl+Z undoes, and a block pasted from Excel fills many cells. " +
             "Shaded cells are shared by everyone at that address. Hatched cells mean their organization gets that newsletter for them.";
+      qs("#sheet-help", container).insertAdjacentHTML("beforeend", ' <span id="column-hint"></span>');
+      renderColumnHint();
       undoStack.length = 0;
       sheet.clearSelection();
       viewChanged();
@@ -1077,7 +1135,7 @@ window.Pages.contacts = {
             sheet.setActive(sheet.view[0].id, `f:${field.id}`);
             sheet.focus();
           }
-          toast(`Added ${field.label}. Its column is at the end of the ${tab === "orgs" ? "organizations" : "people"} spreadsheet.`);
+          toast(sheet.view.length ? `Added ${field.label}. Its column is selected.` : `Added ${field.label}.`);
         } catch (err) {
           toast(err.message, true);
         }

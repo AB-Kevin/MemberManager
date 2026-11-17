@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld("api", {
 
   getSettings: () => invoke("settings:get"),
   setTheme: (theme) => invoke("settings:set-theme", theme),
+  setMemberColumns: (tab, layout) => invoke("settings:set-member-columns", tab, layout),
 
   confirm: (message, okLabel) => invoke("dialog:confirm", message, okLabel),
   openPath: (filePath) => invoke("shell:open-path", filePath),

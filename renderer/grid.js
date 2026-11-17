@@ -11,6 +11,7 @@
 //     onChange(edits),   // [{ rowId, col, value }] -- one cell, or a pasted block
 //     onUndo(), onSort(col), onSelectionChange(), emptyHtml(),
 //     onToggle(rowId, col), // a cell with `toggle` ("open" or "closed") was clicked, or Enter/Space pressed on it
+//     onMoveColumns(keys, target, pinned), // a heading was dragged; see "moving columns" below
 //   });
 //   sheet.setView(rows) // [{ id, groupStart, groupSize, indexInGroup, className }] in display order
 //
@@ -22,6 +23,11 @@
 // read-only, or tinted as shared, on its own (`readOnly`, `shared`), when
 // rows of different kinds share the columns -- an organization and the
 // members listed under it.
+//
+// With `onMoveColumns`, headings can be dragged to move their columns
+// (lib/columnLayout.js does the moving), and dropped among the pinned
+// columns at the left -- or on the checkbox column -- to stay in view while
+// the rest scroll. Columns under one heading move together.
 //
 // Only the rows in view are in the DOM at any time -- every row is the same
 // height, so which ones are in view falls out of the scroll position -- which
@@ -77,6 +83,8 @@
       }
       stickyWidth = SELECT_COL_WIDTH + columns.filter((c) => c.sticky).reduce((total, c) => total + c.width, 0);
       const pinned = columns.filter((c) => c.sticky);
+      const movable = !!config.onMoveColumns;
+      const dragAttr = movable ? 'draggable="true"' : "";
       columns.forEach((c) => (c.stickyLast = c === pinned[pinned.length - 1]));
       table.style.width = `${offset}px`;
       qs("colgroup", table).innerHTML =
@@ -91,7 +99,8 @@
           const col = columns[i];
           let span = 1;
           while (col.header && columns[i + span]?.header === col.header) span++;
-          groupRow += `<th colspan="${span}" class="${col.sticky ? "sticky" : ""} ${col.header ? "group-head" : ""}" ${stickyStyle(col)}>${escapeHtml(col.header || "")}</th>`;
+          const groupDrag = col.header && movable ? `${dragAttr} data-group-key="${escapeHtml(col.key)}" title="Drag to move ${escapeHtml(col.header)}'s columns"` : "";
+          groupRow += `<th colspan="${span}" class="${col.sticky ? "sticky" : ""} ${col.header ? "group-head" : ""}" ${stickyStyle(col)} ${groupDrag}>${escapeHtml(col.header || "")}</th>`;
           i += span - 1;
         }
         groupRow += "</tr>";
@@ -103,7 +112,7 @@
             .map(
               (col) =>
                 `<th data-key="${escapeHtml(col.key)}" class="${col.sticky ? "sticky" : ""} ${col.stickyLast ? "sticky-last" : ""} ${col.type === "count" ? "num" : ""} ${col.type === "flag" ? "flag" : ""} ${col.group ? "group-col" : ""} ${col.header ? "under-group" : ""}"
-                  ${stickyStyle(col)} title="${escapeHtml(col.title || `Sort by ${col.label}`)}">${escapeHtml(col.label)}<span class="sort-mark"></span></th>`
+                  ${stickyStyle(col)} ${dragAttr} title="${escapeHtml((col.title || `Sort by ${col.label}`) + (movable ? " (drag to move)" : ""))}">${escapeHtml(col.label)}<span class="sort-mark"></span></th>`
             )
             .join("")}
         </tr>`;
@@ -564,6 +573,119 @@
       const th = e.target.closest("th[data-key]");
       if (th) config.onSort?.(colByKey(th.dataset.key));
     });
+
+    // ---- moving columns ----
+
+    let drag = null; // { keys, drop } -- the columns whose heading is being dragged, and where they'd land
+    const dropLine = document.createElement("div");
+    dropLine.className = "sheet-drop-line";
+    dropLine.innerHTML = '<span class="sheet-drop-tag"></span>';
+    host.appendChild(dropLine);
+
+    const headingRect = (key) => qs(`tr.label-row th[data-key="${CSS.escape(key)}"]`, thead).getBoundingClientRect();
+    const sameLayout = (a, b) => a.length === b.length && a.every((c, i) => c.key === b[i].key && !!c.sticky === !!b[i].sticky);
+
+    // Where a drop at x (on screen) would put the dragged columns: beside the
+    // heading under the pointer, pinned if that one is; on the checkbox
+    // column, first and pinned; past the last column, last. A heading
+    // scrolled under the pinned ones can't be dropped beside.
+    function dropTarget(x) {
+      const selRight = qs("tr.label-row th.sel-col", thead).getBoundingClientRect().right;
+      const pinnedCols = columns.filter((c) => c.sticky);
+      const pinnedRight = pinnedCols.length ? headingRect(pinnedCols[pinnedCols.length - 1].key).right : selRight;
+      if (x < selRight) return { target: { start: true }, pinned: true, lineX: selRight, pinnedRight };
+      const inPinned = x < pinnedRight;
+      const candidates = columns.filter((c) => !!c.sticky === inPinned);
+      let last = null;
+      for (let i = 0; i < candidates.length; ) {
+        const unit = ColumnLayout.unitOf(columns, candidates[i].key);
+        i += unit.length;
+        const left = headingRect(unit[0]).left;
+        const right = headingRect(unit[unit.length - 1]).right;
+        last = { key: unit[unit.length - 1], right };
+        if (x >= left && x < right) {
+          const before = x < (left + right) / 2;
+          return {
+            target: { key: before ? unit[0] : last.key, side: before ? "before" : "after" },
+            pinned: inPinned,
+            lineX: before ? Math.max(left, inPinned ? selRight : pinnedRight) : right,
+            pinnedRight,
+          };
+        }
+      }
+      if (last) return { target: { key: last.key, side: "after" }, pinned: inPinned, lineX: last.right, pinnedRight };
+      // Every column is pinned, and this is to the right of them.
+      return { target: { key: columns[columns.length - 1].key, side: "after" }, pinned: false, lineX: pinnedRight, pinnedRight };
+    }
+
+    function showDrop(found) {
+      drag.drop = null;
+      let tag = "";
+      if (found) {
+        const next = ColumnLayout.move(columns, drag.keys, found.target, found.pinned);
+        const wasPinned = !!colByKey(drag.keys[0])?.sticky;
+        const pinnedWidth = SELECT_COL_WIDTH + next.filter((c) => c.sticky).reduce((total, c) => total + c.width, 0);
+        if (found.pinned && pinnedWidth > scroll.clientWidth - 120) {
+          tag = "Too wide to keep in view";
+          found = { ...found, blocked: true };
+        } else if (!sameLayout(next, columns)) {
+          drag.drop = found;
+          if (found.pinned !== wasPinned) tag = found.pinned ? "Stays in view" : "Scrolls";
+        } else found = null;
+      }
+      dropLine.style.display = found ? "block" : "none";
+      dropLine.classList.toggle("blocked", !!found?.blocked);
+      scroll.classList.toggle("drop-pinned", !!drag.drop?.pinned);
+      if (!found) return;
+      const box = scroll.getBoundingClientRect();
+      Object.assign(dropLine.style, { left: `${Math.round(found.lineX) - 1}px`, top: `${box.top}px`, height: `${scroll.clientHeight}px` });
+      const tagEl = qs(".sheet-drop-tag", dropLine);
+      tagEl.textContent = tag;
+      tagEl.style.display = tag ? "" : "none";
+    }
+
+    function endDrag() {
+      drag = null;
+      dropLine.style.display = "none";
+      scroll.classList.remove("drop-pinned");
+      qsa(".col-dragging", thead).forEach((th) => th.classList.remove("col-dragging"));
+    }
+
+    thead.addEventListener("dragstart", (e) => {
+      const th = e.target.closest?.("th[draggable]");
+      if (!th || !config.onMoveColumns) return;
+      if (editor) commitEdit();
+      const keys = ColumnLayout.unitOf(columns, th.dataset.key || th.dataset.groupKey);
+      if (!keys.length) return;
+      drag = { keys, drop: null };
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("application/x-sheet-column", keys.join("\n"));
+      for (const key of keys) qs(`tr.label-row th[data-key="${CSS.escape(key)}"]`, thead)?.classList.add("col-dragging");
+      qs(`th[data-group-key="${CSS.escape(keys[0])}"]`, thead)?.classList.add("col-dragging");
+    });
+    scroll.addEventListener("dragover", (e) => {
+      if (!drag) return;
+      e.preventDefault();
+      const found = dropTarget(e.clientX);
+      showDrop(found);
+      e.dataTransfer.dropEffect = drag.drop ? "move" : "none";
+      // Near either edge of the scrolling part, scroll to bring more columns in.
+      const box = scroll.getBoundingClientRect();
+      if (e.clientX > box.right - 40) scroll.scrollLeft += 24;
+      else if (e.clientX >= found.pinnedRight && e.clientX < found.pinnedRight + 40 && scroll.scrollLeft > 0) scroll.scrollLeft -= 24;
+    });
+    scroll.addEventListener("dragleave", (e) => {
+      if (drag && !scroll.contains(e.relatedTarget)) showDrop(null);
+    });
+    scroll.addEventListener("drop", (e) => {
+      if (!drag) return;
+      e.preventDefault();
+      const { keys, drop } = drag;
+      endDrag();
+      if (drop) config.onMoveColumns(keys, drop.target, drop.pinned);
+    });
+    // Dropped somewhere else, or Esc.
+    thead.addEventListener("dragend", endDrag);
 
     scroll.addEventListener("scroll", () => renderBody());
     const onResize = () => {

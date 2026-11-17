@@ -22,6 +22,7 @@ const searchLib = require("./lib/search");
 const lists = require("./lib/lists");
 const nearZip = require("./lib/nearZip");
 const cards = require("./lib/cards");
+const ColumnLayout = require("./lib/columnLayout");
 const { appFolder, chooseFolder, readMovedNote, moveToAbApps } = require("ab-common/appfolder");
 const { readIdentity, watchIdentity, sharedServices } = require("./lib/abApps");
 const { Team, peopleDir, readPeople, isActive, activeHosts } = require("./lib/team");
@@ -2442,7 +2443,23 @@ function plural(n, word) {
 // Settings
 // ---------------------------------------------------------------------------
 
-ipcMain.handle("settings:get", async () => ({ theme: savedTheme(), abApps: abIdentity ? { name: abIdentity.name, class: abIdentity.class } : null }));
+ipcMain.handle("settings:get", async () => ({
+  theme: savedTheme(),
+  abApps: abIdentity ? { name: abIdentity.name, class: abIdentity.class } : null,
+  memberColumns: store.getSettings().memberColumns || {},
+}));
+
+// How the Members page's columns are arranged on this computer, one tab at a
+// time (lib/columnLayout.js); null puts that tab's columns back as usual.
+ipcMain.handle("settings:set-member-columns", async (event, tab, layout) => {
+  if (!["people", "orgs"].includes(tab)) throw new Error("Unknown tab.");
+  if (layout !== null && !ColumnLayout.isLayout(layout)) throw new Error("That column layout couldn't be read.");
+  const all = { ...(store.getSettings().memberColumns || {}) };
+  if (layout) all[tab] = { order: layout.order, pinned: layout.pinned };
+  else delete all[tab];
+  store.updateSettings({ memberColumns: all });
+  return all;
+});
 
 // Applies right away.
 ipcMain.handle("settings:set-theme", async (event, theme) => {

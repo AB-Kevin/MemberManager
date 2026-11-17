@@ -488,6 +488,31 @@ th.num, td.num { text-align: right; }
 /* The last pinned column gets a heavier edge, so rows sliding under it read as such. */
 .sheet .sticky-last { border-right-color: var(--gray-400); }
 .sheet .sel-col { text-align: center; padding: 0; }
+/* Dragging a heading to move its columns. */
+.sheet thead th.col-dragging { opacity: 0.45; }
+.sheet-scroll.drop-pinned .sheet thead th.sticky:not(.sel-col) { background: var(--green-100); }
+.sheet-drop-line {
+  display: none;
+  position: fixed;
+  z-index: 50;
+  width: 3px;
+  background: var(--accent-text);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.sheet-drop-line.blocked { background: var(--danger); }
+.sheet-drop-tag {
+  position: absolute;
+  top: 6px;
+  left: 7px;
+  padding: 2px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--surface-card);
+  background: var(--accent-text);
+  border-radius: var(--radius-control);
+}
+.sheet-drop-line.blocked .sheet-drop-tag { background: var(--danger); }
 .sheet .sel-col input, .sheet .cell-flag input { width: 15px; height: 15px; margin: 0; vertical-align: middle; accent-color: var(--fill-accent); cursor: pointer; }
 .sheet td.cell { cursor: cell; }
 .sheet td.cell-flag { text-align: center; cursor: default; }
