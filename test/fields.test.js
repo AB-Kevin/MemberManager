@@ -148,6 +148,12 @@ test("a household field moved to people gives everyone their household's value",
   assert.deepEqual([...plan.people], [["c1", true], ["c2", true], ["c3", false]], "No is a value too; a blank isn't");
   assert.equal(plan.households, 3);
   assert.equal(plan.stranded, 1);
+
+  // Only the people with a Member ID: an account's head.
+  contacts[1].memberId = "A1";
+  const heads = Fields.householdToPeople("over65", households, contacts, { onlyMembers: true });
+  assert.deepEqual([...heads.people], [["c2", true]]);
+  assert.equal(heads.stranded, 2, "h2's only person has no Member ID, and h4 has no one");
 });
 
 test("a saved list's field key is renamed in its conditions, columns and sort", () => {

@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld("api", {
   updateField: (id, patch) => invoke("fields:update", id, patch),
   removeField: (id) => invoke("fields:remove", id),
   moveField: (id, direction) => invoke("fields:move", id, direction),
-  moveFieldToPeople: (id) => invoke("fields:to-people", id),
+  moveFieldToPeople: (id, options) => invoke("fields:to-people", id, options),
 
   // Bringing in SendNewsletters' list and FormTracker's contacts.
   migrationSources: () => invoke("migrate:sources"),
@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld("api", {
   // Which file is which table, when the newest isn't the one to use.
   chooseFundTrackFile: (table, file) => invoke("fundtrack:choose", table, file),
   previewFundTrack: () => invoke("fundtrack:preview"),
+  mapFundTrackColumn: (table, header, fieldId) => invoke("fundtrack:map-column", table, header, fieldId),
   commitFundTrack: () => invoke("fundtrack:commit"),
 
   // Find, Lists and Near ZIP.
@@ -99,6 +100,7 @@ contextBridge.exposeInMainWorld("api", {
   setMemberColumns: (tab, layout) => invoke("settings:set-member-columns", tab, layout),
 
   confirm: (message, okLabel) => invoke("dialog:confirm", message, okLabel),
+  choose: (message, detail, buttons) => invoke("dialog:choose", message, detail, buttons),
   openPath: (filePath) => invoke("shell:open-path", filePath),
   moveDataToAbApps: () => invoke("data:move-to-ab-apps"),
   getDataLocation: () => invoke("data:get-location"),

@@ -195,16 +195,24 @@ window.Pages.fields = {
           })
         );
         qs("[data-to-people]", row)?.addEventListener("click", async () => {
-          const plan = F.householdToPeople(id, households, contacts);
-          const message =
-            `Make ${field.label} a field of each person's own, instead of the household's? Only this field moves; the other household fields stay as they are.` +
-            (plan.people.size ? `\n\nEveryone in a household that has it filled in gets their own copy of its value — ${plural(plan.people.size, "person", "people")} in all. After that, changing one person's leaves the others' as they are.` : "") +
-            (plan.stranded ? `\n\n${plural(plan.stranded, "household")} with a value ${plan.stranded === 1 ? "has" : "have"} no one in ${plan.stranded === 1 ? "it" : "them"}, so ${plan.stranded === 1 ? "that value is" : "those values are"} dropped.` : "") +
-            "\n\nSaved lists of people and person cards that use it keep it; lists and cards of households lose it. A FormTracker or SendNewsletters template or filter that reads it from the household will find it blank." +
-            "\n\nThere's no button to move it back.";
-          if (!(await confirmAction(message, "Make it a person field"))) return;
+          // Everyone at the address gets its value, or only the people with
+          // a Member ID -- for a value that's really a FundTrack account's,
+          // which the import keeps on the account's head.
+          const everyone = F.householdToPeople(id, households, contacts);
+          const members = F.householdToPeople(id, households, contacts, { onlyMembers: true });
+          const choice = await window.api.choose(
+            `Make ${field.label} a field of each person's own, instead of the household's?`,
+            "Only this field moves; the other household fields stay as they are. Who should get their household's value?" +
+              `\n\n• Everyone in the household: ${plural(everyone.people.size, "person", "people")}.` +
+              `\n• Only people with a Member ID (each account's head, where the FundTrack import puts an account's own fields): ${plural(members.people.size, "person", "people")}; everyone else's is left blank.` +
+              "\n\nAfter that, changing one person's leaves the others' as they are. A household with no one to give it to loses its value." +
+              " Saved lists of people and person cards that use it keep it; lists and cards of households lose it. A FormTracker or SendNewsletters template or filter that reads it from the household will find it blank." +
+              "\n\nThere's no button to move it back.",
+            ["Everyone in the household", "Only people with a Member ID"]
+          );
+          if (choice < 0) return;
           try {
-            const result = await window.api.moveFieldToPeople(id);
+            const result = await window.api.moveFieldToPeople(id, { onlyMembers: choice === 1 });
             toast(`${field.label} is a person field now${result.people ? `, filled in for ${plural(result.people, "person", "people")}` : ""}.` + (result.householdUses ? ` ${plural(result.householdUses, "household list or card", "household lists or cards")} used it and won't show it now.` : ""));
           } catch (err) {
             toast(err.message, true);

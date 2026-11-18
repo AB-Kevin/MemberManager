@@ -133,11 +133,6 @@ window.Pages.import = {
                ${info.unknown?.length ? `<p class="hint">Not recognized (no FundTrack table's columns): ${info.unknown.map(escapeHtml).join(", ")}</p>` : ""}
                ${info.ignored?.length ? `<p class="hint">Copies, used only if chosen above: ${info.ignored.map(escapeHtml).join(", ")}</p>` : ""}
                ${info.lastImport ? `<p class="hint">Last brought in ${escapeHtml(formatDate(info.lastImport.at))} by ${escapeHtml(info.lastImport.by || "someone")}, from exports dated ${shortDate(info.lastImport.dated)}.</p>` : ""}
-               ${
-                 info.fieldsToAdd?.length
-                   ? `<p class="hint">These fields are added the first time: ${info.fieldsToAdd.map((f) => `${escapeHtml(f.label)} (${escapeHtml(Fields.levelLabel(f.appliesTo).toLowerCase())})`).join(", ")}.</p>`
-                   : ""
-               }
                <div class="row"><button class="btn" id="ft-check" type="button" ${ready ? "" : "disabled"}>Check what it would do</button></div>
                <div id="ft-preview"></div>`
             : `<p class="hint">Choose the folder FundTrack's exports are saved in (usually "AB Files - 07 Archive\exports"). The files can be named anything; they're recognized by their columns.</p>
@@ -205,7 +200,27 @@ window.Pages.import = {
             : ""
         }
         <p class="hint">Plans: ${p.plans.map((x) => `${escapeHtml(x.name)} (${x.count.toLocaleString()})`).join(", ")}.</p>
+        ${fundTrackFieldsHtml(p.fieldMap)}
         <div class="row"><button class="btn" id="ft-commit" type="button">Bring it in</button></div>`;
+      const remap = qs("#ft-remap", area);
+      remap?.addEventListener("toggle", () => (remapOpen = remap.open));
+      const remapTo = async (table, header, fieldId) => {
+        qsa("[data-ft-map], [data-ft-reset]", area).forEach((el) => (el.disabled = true));
+        try {
+          await window.api.mapFundTrackColumn(table, header, fieldId);
+          renderFundTrackPreview(await window.api.previewFundTrack());
+        } catch (err) {
+          toast(err.message, true);
+          renderFundTrackPreview(p);
+        }
+      };
+      qsa("[data-ft-map]", area).forEach((select) => select.addEventListener("change", () => remapTo(select.dataset.ftMap, select.dataset.header, select.value)));
+      qsa("[data-ft-reset]", area).forEach((link) =>
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          remapTo(link.dataset.ftReset, link.dataset.header, null);
+        })
+      );
       qs("#ft-commit", area).addEventListener("click", async (e) => {
         e.target.disabled = true;
         e.target.textContent = "Bringing it in…";
@@ -224,6 +239,78 @@ window.Pages.import = {
         }
       });
     }
+    // Which fields the exports' columns fill. A column goes into the field
+    // with its name unless another was chosen here; the full list of columns
+    // is folded away under "Remap fields", since there are dozens.
+    let remapOpen = false;
+    const levelWord = (appliesTo) => Fields.levelLabel(appliesTo).toLowerCase();
+    const ON = { groups: { contact: "on the account's head", household: "on the head's address" } };
+    const GOES = {
+      groups: "A person field goes on the account's head (the person with the Member ID), a household field on the head's address.",
+      individuals: "Each person's own fields.",
+      orgs: "The church's fields.",
+    };
+    function fundTrackFieldsHtml(map) {
+      if (!map) return "";
+      const fieldOf = (t, id) => t.fields.find((f) => f.id === id);
+      const filled = map.tables.flatMap((t) =>
+        t.columns.filter((c) => c.fieldId && fieldOf(t, c.fieldId)).map((c) => {
+          const f = fieldOf(t, c.fieldId);
+          return `${escapeHtml(f.label)} ← ${escapeHtml(t.name)} ${escapeHtml(c.header)}${t.table === "groups" ? ` <span class="hint">(${ON.groups[f.appliesTo]})</span>` : ""}`;
+        })
+      );
+      const unreadable = map.tables.flatMap((t) =>
+        t.unreadable.map((u) => {
+          const f = fieldOf(t, u.fieldId);
+          const kind = Fields.TYPES.find((x) => x.value === f?.type)?.label || "";
+          return `<li>${escapeHtml(t.name)} ${escapeHtml(u.header)}: ${plural(u.count, "value")} that ${u.count === 1 ? "doesn't" : "don't"} fit ${escapeHtml(f?.label || "its field")}, a ${escapeHtml(kind)} field
+            (${u.examples.map((x) => `“${escapeHtml(x)}”`).join(", ")}), ${u.count === 1 ? "is" : "are"} left out.</li>`;
+        })
+      );
+      const option = (f, selected) => `<option value="${escapeHtml(f.id)}" ${selected ? "selected" : ""}>${escapeHtml(f.label)} (${escapeHtml(levelWord(f.appliesTo))})</option>`;
+      const tableHtml = (t) => `
+        <h3>${escapeHtml(t.name)}</h3>
+        <p class="hint">${GOES[t.table] || ""}</p>
+        <table class="mapping-table">
+          <thead><tr><th>Column</th><th>Goes into</th><th>Examples</th></tr></thead>
+          <tbody>${t.columns
+            .map(
+              (c) => `<tr class="${c.fieldId ? "ft-mapped" : ""}">
+                <td>${escapeHtml(c.header)}</td>
+                <td><select data-ft-map="${t.table}" data-header="${escapeHtml(c.header)}" aria-label="Field for ${escapeHtml(c.header)}">
+                    <option value="" ${c.fieldId ? "" : "selected"}>Not into a field</option>
+                    ${t.fields.map((f) => option(f, f.id === c.fieldId)).join("")}
+                  </select>
+                  ${
+                    c.chosen
+                      ? `<a href="#" class="ft-reset" data-ft-reset="${t.table}" data-header="${escapeHtml(c.header)}" title="Forget this choice; go by the column's name again">Match by name</a>`
+                      : c.fieldId
+                      ? `<span class="hint">same name</span>`
+                      : ""
+                  }</td>
+                <td class="hint">${(c.samples || []).map(escapeHtml).join(" · ") || "(blank)"}</td>
+              </tr>`
+            )
+            .join("")}</tbody>
+        </table>`;
+      return `
+        <div class="ft-fields">
+          <p class="hint"><strong>Fields filled:</strong> ${filled.length ? filled.join("; ") : "none — no column has the name of one of your fields."}</p>
+          ${unreadable.length ? `<ul class="preview-notes">${unreadable.join("")}</ul>` : ""}
+          ${
+            map.unfilled.length
+              ? `<p class="hint">No column fills ${map.unfilled.map((f) => `${escapeHtml(f.label)} (${escapeHtml(levelWord(f.appliesTo))})`).join(", ")}. Choose one under Remap fields if FundTrack has it.</p>`
+              : ""
+          }
+          <details class="ft-remap" id="ft-remap" ${remapOpen ? "open" : ""}>
+            <summary>Remap fields</summary>
+            <p class="hint">Each column goes into the field with the same name, unless you choose another here. Your choices are kept for next time.
+              A column not into a field is still kept as a FundTrack detail, for Find and Lists. Add a field on the Fields page to bring a column in as one.</p>
+            ${map.tables.map(tableHtml).join("")}
+          </details>
+        </div>`;
+    }
+
     renderFundTrack();
 
     qs("#back-link", container).addEventListener("click", (e) => {

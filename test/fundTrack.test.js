@@ -125,7 +125,10 @@ test("everyone in two accounts at one address goes to the right account", () => 
     person("u-katie", "G2", "Katie", "Byler", { IndividualType: "Child", BirthDate: "01/02/2015", IsInactiveThisYear: "True" }),
     person("u-lost", "G9", "Lost", "Person"),
   ];
-  const plan = ft.planPeople(rows, contacts, (g) => accounts[g] || null, fields);
+  // BirthDate fills Birth date by its name; the other two were chosen on the Import page.
+  const headers = ["MemberIndividualUUID", "MemberGroupUID", "FirstName", "LastName", "fullName", "IndividualType", "BirthDate", "Gender", "fullGender", "IsInactiveThisYear"];
+  const columns = ft.fieldColumns("individuals", headers, fields, { IndividualType: "role", fullGender: "gender", Gender: "" });
+  const plan = ft.planPeople(rows, contacts, (g) => accounts[g] || null, columns, fields);
   assert.deepEqual(plan.stats, { rowsRead: 5, added: 1, updated: 3, unchanged: 0, noHousehold: 1 });
   const patch = (id) => plan.updates.find((u) => u.id === id).patch;
   assert.equal(patch("amos").fundTrackGroupId, "G1");
@@ -142,7 +145,7 @@ test("everyone in two accounts at one address goes to the right account", () => 
 
   // The next import finds everyone by their FundTrack id: nothing changes.
   const after = contacts.map((c) => ({ ...c, ...(plan.updates.find((u) => u.id === c.id)?.patch || {}) })).concat([{ id: "katie", ...katie }]);
-  const again = ft.planPeople(rows, after, (g) => accounts[g] || null, fields);
+  const again = ft.planPeople(rows, after, (g) => accounts[g] || null, columns, fields);
   assert.deepEqual(again.stats, { rowsRead: 5, added: 0, updated: 0, unchanged: 4, noHousehold: 1 });
 });
 
@@ -160,7 +163,9 @@ test("churches: matched by id or name, contacts and blanks filled in, and a chur
     { MemberOrganizationUID: "U1", FirstName: "Gone", LastName: "Away", IsInactive: "True" },
   ];
   const addresses = [{ MemberOrganizationUID: "U1", AddressLine1: "5 Church Rd", City: "Belleville", State: "PA", Zip: "17004", IsMailingAddress: "True" }];
-  const plan = ft.planOrgs(rows, contacts, addresses, orgs, orgFields);
+  const columns = ft.fieldColumns("orgs", ["MemberOrganizationUID", "OrganizationName", "OrganizationCode", "DfltContactPrimePhoneCopy"], orgFields, { OrganizationCode: "code", DfltContactPrimePhoneCopy: "phone" });
+  rows[0].DfltContactPrimePhoneCopy = "717-555-0101";
+  const plan = ft.planOrgs(rows, contacts, addresses, orgs, columns, orgFields);
   assert.equal(plan.stats.sameAsAnother, 1);
   const p = plan.updates[0].patch;
   assert.equal(p.fundTrackId, "U1");
@@ -172,17 +177,113 @@ test("churches: matched by id or name, contacts and blanks filled in, and a chur
   assert.deepEqual(plan.inserts.map((o) => o.name), ["Pine Hill"], "an inactive church new to the list isn't added");
 });
 
-test("the fields the import needs are made once, as person, household and church fields", () => {
-  const missing = ft.missingFields([{ id: "x", label: "phone", appliesTo: "contact", type: "text" }]);
-  assert.deepEqual(
-    missing.map((f) => `${f.label}/${f.appliesTo}`),
-    ["Plan/contact", "Household type/contact", "Social Security exempt/household", "Birth date/contact", "Role/contact", "Gender/contact", "Code/org", "Denomination/org", "Organization type/org", "Phone/org"]
+test("a church merged into another isn't brought back by the next import", () => {
+  const { mergedOrgs, planImport } = require("../lib/listImport");
+  // FundTrack keeps Beacon of Light twice; the office merged "BEACON OF LIGHT"
+  // (FundTrack's U2) into the Mennonite church (U1), twice over.
+  const orgs = [{ id: "bolmc", name: "Beacon of Light Mennonite Church", fundTrackId: "U1", fields: {} }];
+  const retired = [
+    { kind: "org", fromId: "old1", toId: "mid", snapshot: { name: "BEACON OF LIGHT", fundTrackId: "U2" } },
+    { kind: "org", fromId: "mid", toId: "bolmc", snapshot: { name: "Beacon of Light (2)" } },
+    { kind: "household", fromId: "h", toId: "h2", snapshot: { name: "x" } },
+    { kind: "org", fromId: "gone", toId: null, snapshot: { name: "Closed Church" } },
+  ];
+  const merged = mergedOrgs(retired, orgs);
+  assert.deepEqual([...merged.byFundTrackId], [["U2", "bolmc"]], "followed through to the church still on the list");
+  assert.deepEqual([...merged.byName.values()], ["bolmc", "bolmc"]);
+  assert.ok(![...merged.byName.keys()].some((k) => /closed/.test(k)), "a deleted church isn't an alias");
+
+  // The churches: U2's row is left out, U1's still updates the one kept.
+  const plan = ft.planOrgs(
+    [
+      { MemberOrganizationUID: "U1", OrganizationName: "BEACON OF LIGHT MENNONITE CHURCH" },
+      { MemberOrganizationUID: "U2", OrganizationName: "BEACON OF LIGHT" },
+    ],
+    [],
+    [],
+    orgs,
+    [],
+    [],
+    { merged }
   );
-  assert.equal(missing.find((f) => f.appliesTo === "household").type, "yesno");
+  assert.deepEqual([plan.stats.added, plan.stats.merged, plan.inserts.length], [0, 1, 0]);
+
+  // A household whose church is "BEACON OF LIGHT" joins the one kept.
+  const people = planImport(
+    [{ Name: "Amos Byler", Church: "BEACON OF LIGHT" }],
+    { Name: "name", Church: "orgName" },
+    { mode: "person", publicationIds: [] },
+    { contacts: [], households: [], orgs, orgAliases: merged.byName },
+    []
+  );
+  assert.equal(people.orgInserts.length, 0);
+  assert.equal(people.contactInserts[0].orgId, "bolmc");
 });
 
-test("a field already made under a differently written name isn't made again", () => {
-  const existing = [{ id: "s", label: "SocialSecurityExempt", appliesTo: "household", type: "yesno" }];
-  assert.ok(!ft.missingFields(existing).some((f) => f.appliesTo === "household"));
-  assert.equal(ft.fieldIndex(existing).household[ft.labelKey("Social Security exempt")].id, "s");
+const officeFields = [
+  { id: "ss", label: "Social Security Exempt", appliesTo: "contact", type: "yesno" },
+  { id: "plan", label: "Plan", appliesTo: "contact", type: "choice" },
+  { id: "start", label: "Start Date", appliesTo: "household", type: "date" },
+  { id: "code", label: "Code", appliesTo: "org", type: "text" },
+];
+const groupHeaders = ["ID", "MemberGroupUID", "GroupCode", "FirstName", "PrimaryAddressLine1", "fundName", "StartDate", "SocialSecurityExempt", "Last4SSN", "Notes"];
+
+test("columns go into the field with their name, from the tables that can fill it", () => {
+  const cols = ft.fieldColumns("groups", groupHeaders, officeFields);
+  assert.deepEqual(
+    cols.map((c) => [c.header, c.fieldId, c.chosen]),
+    [
+      ["fundName", null, false],
+      ["StartDate", "start", false],
+      ["SocialSecurityExempt", "ss", false],
+      ["Notes", null, false],
+    ],
+    "built-in, identity and bookkeeping columns aren't offered; a church field isn't filled from MemberGroups"
+  );
+  assert.deepEqual(ft.fieldColumns("orgs", ["MemberOrganizationUID", "OrganizationName", "Code", "StartDate"], officeFields).map((c) => [c.header, c.fieldId]), [
+    ["Code", "code"],
+    ["StartDate", null],
+  ]);
+});
+
+test("a column with no field of its name fills nothing -- nothing made up", () => {
+  // The organizations' HasSSNExemption isn't MemberGroups' column, and isn't read from it.
+  const cols = ft.fieldColumns("groups", ["MemberGroupUID", "GroupCode", "HasSSNExemption"], [{ id: "ss", label: "Social Security exempt", appliesTo: "contact", type: "yesno" }]);
+  assert.deepEqual(cols.map((c) => [c.header, c.fieldId]), [["HasSSNExemption", null]]);
+});
+
+test("choices made on the Import page win, are kept, and are forgotten when their field goes", () => {
+  const saved = { fundName: "plan", SocialSecurityExempt: "", StartDate: "gone" };
+  const cols = Object.fromEntries(ft.fieldColumns("groups", groupHeaders, officeFields, saved).map((c) => [c.header, c]));
+  assert.deepEqual([cols.fundName.fieldId, cols.fundName.chosen], ["plan", true]);
+  assert.deepEqual([cols.SocialSecurityExempt.fieldId, cols.SocialSecurityExempt.chosen], [null, true], "sent to no field");
+  assert.deepEqual([cols.StartDate.fieldId, cols.StartDate.chosen], ["start", false], "a removed field's choice goes back to matching by name");
+  // A field chosen for one column isn't matched by name to another too.
+  const twice = ft.fieldColumns("groups", groupHeaders, officeFields, { Notes: "ss" });
+  assert.deepEqual(twice.filter((c) => c.fieldId === "ss").map((c) => c.header), ["Notes"]);
+});
+
+test("values are read as their field reads them, and the ones that don't fit are counted", () => {
+  const byId = new Map(officeFields.map((f) => [f.id, f]));
+  const cols = ft.fieldColumns("groups", groupHeaders, officeFields, { fundName: "plan" });
+  const rows = [
+    { SocialSecurityExempt: "Yes", StartDate: "03/01/2010", fundName: "Medical Aid & Alms Plan" },
+    { SocialSecurityExempt: "No", StartDate: "00/00/0000", fundName: "" },
+    { SocialSecurityExempt: "In Process", StartDate: "", fundName: "" },
+    { SocialSecurityExempt: "False", StartDate: "", fundName: "" },
+  ];
+  assert.deepEqual(rows.map((r) => ft.rowFields(r, cols, byId).values), [
+    { contact: { ss: true, plan: "Medical Aid & Alms Plan" }, household: { start: "2010-03-01" }, org: {} },
+    { contact: { ss: false }, household: {}, org: {} },
+    { contact: {}, household: {}, org: {} },
+    { contact: { ss: false }, household: {}, org: {} },
+  ]);
+  assert.deepEqual(ft.unreadableValues(rows, cols, byId), [{ header: "SocialSecurityExempt", fieldId: "ss", count: 1, examples: ["In Process"] }]);
+  assert.deepEqual(ft.cleanRows(rows, cols, byId)[1].StartDate, "", "no date is blank, not a date that doesn't fit");
+});
+
+test("columns that go into fields aren't kept as details too", () => {
+  const cols = ft.fieldColumns("groups", groupHeaders, officeFields);
+  const row = { MemberGroupUID: "G1", GroupCode: "A1", SocialSecurityExempt: "Yes", StartDate: "03/01/2010", Notes: "Call first", fundName: "Plan A", Last4SSN: "1234" };
+  assert.deepEqual(ft.accountDetails(row, cols), { fundTrackGroupId: "G1", fundTrackAccount: { Notes: "Call first", fundName: "Plan A" } });
 });

@@ -1623,7 +1623,6 @@ function fundTrackStatus(folder) {
 const fundTrackSummary = (folder) => ({
   ...fundTrackStatus(folder),
   lastImport: store.getSettings().fundTrackImport || null,
-  fieldsToAdd: fundTrack.missingFields(store.list("fields")),
 });
 
 ipcMain.handle("fundtrack:status", async () => fundTrackSummary(guessExportsFolder()));
@@ -1671,28 +1670,28 @@ function readFundTrack(folder) {
   };
 }
 
+// Where each table's columns go: into the office's field of the same name, or
+// the one chosen on the Import page (lib/fundTrack.js, "the office's fields").
+function fundTrackColumns(data, fields) {
+  const saved = store.getSettings().fundTrackFieldMap || {};
+  return Object.fromEntries(Object.keys(fundTrack.FIELD_LEVELS).map((table) => [table, fundTrack.fieldColumns(table, data[table].headers, fields, saved[table])]));
+}
+
 // The households' import (lib/listImport.js), set up for MemberGroups: the
-// membership export's mapping, plus Phone, Plan and Household type on the
-// head, and whether the household is exempt from Social Security.
-function fundTrackHouseholdImport(groups, fields, plan, publications) {
+// membership export's mapping, plus the columns that go into fields -- a
+// person field on the account's head, a household field on its address.
+// `rows` are MemberGroups' rows with those columns as the fields read them.
+function fundTrackHouseholdImport(groups, columns, fields, plan, publications) {
   const preset = membershipPreset(groups.headers, groups.rows, publications);
   if (!preset) throw new Error("The MemberGroups export doesn't have the columns MemberManager expects (GroupCode, MemberGroupUID, PrimaryAddressLine1, statusTerm, fundName).");
-  const index = fundTrack.fieldIndex(fields);
-  // The account's own fields, on its head, and its household's (lib/fundTrack.js).
-  const target = (label, column, level = "contact") => {
-    const field = index[level][fundTrack.labelKey(label)];
-    return field ? { [column]: `field:${field.id}` } : {};
-  };
   const mapping = withoutSensitive({
     ...preset.mapping,
-    ...target("Phone", "PrimaryPhone"),
-    ...target("Plan", "fundName"),
-    ...target("Household type", "GroupType"),
-    ...target("Social Security exempt", "HasSSNExemption", "household"),
+    ...Object.fromEntries(columns.filter((c) => c.fieldId).map((c) => [c.header, `field:${c.fieldId}`])),
   });
   const base = { ...preset.options, mode: "person", defaultCopies: "1", addInactive: true, sourceBatch: `FundTrack ${new Date().toLocaleDateString()}` };
   return {
     mapping,
+    rows: fundTrack.cleanRows(groups.rows, columns, new Map(fields.map((f) => [f.id, f]))),
     // The newsletter plan's households can get Our Health; everyone else's are only kept.
     passes: [
       { ...base, only: { column: PLAN_COLUMN, value: plan } },
@@ -1701,16 +1700,54 @@ function fundTrackHouseholdImport(groups, fields, plan, publications) {
   };
 }
 
+// For the Import page's "Remap fields": each table's columns, where they go
+// and a few of their values; the fields no column fills; and the values that
+// don't fit their field.
+function fundTrackFieldMap(data, columns, fields) {
+  const byId = new Map(fields.map((f) => [f.id, f]));
+  const brief = (f) => ({ id: f.id, label: f.label, appliesTo: f.appliesTo, type: f.type });
+  const tables = Object.keys(fundTrack.FIELD_LEVELS).filter((table) => data[table].headers.length);
+  const filled = new Set(tables.flatMap((table) => columns[table].map((c) => c.fieldId).filter(Boolean)));
+  return {
+    tables: tables.map((table) => ({
+      table,
+      name: FUNDTRACK_TABLE_NAMES[table],
+      columns: columns[table].map((c) => ({ ...c, samples: listImport.sampleValues(data[table].rows, c.header, 3) })),
+      fields: fundTrack.fieldsFor(table, fields).map(brief),
+      unreadable: fundTrack.unreadableValues(data[table].rows, columns[table], byId),
+    })),
+    unfilled: fields.filter((f) => !filled.has(f.id) && tables.some((t) => fundTrack.FIELD_LEVELS[t].includes(f.appliesTo))).map(brief),
+  };
+}
+
+// Sends one of an export's columns into a field (`fieldId`), into none (""),
+// or back to going by its name (null). Kept for every import after.
+ipcMain.handle("fundtrack:map-column", async (event, table, header, fieldId) => {
+  const levels = fundTrack.FIELD_LEVELS[table];
+  if (!levels || typeof header !== "string" || !header) throw new Error("That column can't go into a field.");
+  if (fieldId) {
+    const field = store.get("fields", fieldId);
+    if (!field) throw new Error("That field is no longer there.");
+    if (!levels.includes(field.appliesTo)) throw new Error(`${FUNDTRACK_TABLE_NAMES[table]}'s columns can't fill a field for ${Fields.levelLabel(field.appliesTo).toLowerCase()}s.`);
+  }
+  const all = store.getSettings().fundTrackFieldMap || {};
+  const mine = { ...(all[table] || {}) };
+  if (fieldId === null || fieldId === undefined) delete mine[header];
+  else mine[header] = fieldId || "";
+  store.updateSettings({ fundTrackFieldMap: { ...all, [table]: mine } });
+  return true;
+});
+
 ipcMain.handle("fundtrack:preview", async () => {
   const folder = guessExportsFolder();
   const data = readFundTrack(folder);
-  const existingFields = store.list("fields");
-  const fields = [...existingFields, ...fundTrack.missingFields(existingFields).map((f, i) => ({ ...f, id: `new-${i}` }))];
+  const fields = store.list("fields");
+  const columns = fundTrackColumns(data, fields);
   const list = loadList();
-  const { mapping, passes } = fundTrackHouseholdImport(data.groups, fields, DEFAULT_PLAN, list.publications);
-  const existing = { contacts: list.contacts, households: list.households, orgs: list.orgs };
+  const { mapping, passes, rows } = fundTrackHouseholdImport(data.groups, columns.groups, fields, DEFAULT_PLAN, list.publications);
+  const existing = importExisting(list);
   const missingPeople = new Set(data.groups.rows.map((r) => String(r.MemberGroupUID || "").trim()));
-  const [a, b] = passes.map((options) => listImport.planImport(data.groups.rows, mapping, options, existing, list.publications, fields).stats);
+  const [a, b] = passes.map((options) => listImport.planImport(rows, mapping, options, existing, list.publications, fields).stats);
   const plans = new Map();
   for (const row of data.groups.rows) plans.set(row[PLAN_COLUMN], (plans.get(row[PLAN_COLUMN]) || 0) + 1);
   const linked = new Set(list.contacts.filter((c) => c.fundTrackId).map((c) => c.fundTrackId));
@@ -1732,6 +1769,7 @@ ipcMain.handle("fundtrack:preview", async () => {
       inactiveStopped: a.inactiveStopped + b.inactiveStopped,
       ambiguous: a.ambiguous + b.ambiguous,
     },
+    fieldMap: fundTrackFieldMap(data, columns, fields),
   };
 });
 
@@ -1740,15 +1778,15 @@ ipcMain.handle("fundtrack:commit", async () => {
   const data = readFundTrack(folder);
   const now = new Date().toISOString();
   const batch = `FundTrack ${new Date().toLocaleDateString()}`;
-  for (const def of fundTrack.missingFields(store.list("fields"))) store.insert("fields", def);
   const fields = store.list("fields");
+  const columns = fundTrackColumns(data, fields);
 
   // 1. Households and their heads.
-  const { mapping, passes } = fundTrackHouseholdImport(data.groups, fields, DEFAULT_PLAN, store.list("publications"));
+  const { mapping, passes, rows } = fundTrackHouseholdImport(data.groups, columns.groups, fields, DEFAULT_PLAN, store.list("publications"));
   const householdStats = { added: 0, updated: 0, unchanged: 0, inactiveStopped: 0, ambiguous: 0 };
   for (const options of passes) {
     const list = loadList();
-    const plan = listImport.planImport(data.groups.rows, mapping, options, { contacts: list.contacts, households: list.households, orgs: list.orgs }, list.publications, fields);
+    const plan = listImport.planImport(rows, mapping, options, importExisting(list), list.publications, fields);
     applyImportPlan(plan, list);
     for (const key of Object.keys(householdStats)) householdStats[key] += plan.stats[key] || 0;
   }
@@ -1763,7 +1801,7 @@ ipcMain.handle("fundtrack:commit", async () => {
     const head = headByMemberId.get(memberKey(row.GroupCode));
     if (!head) continue;
     let householdId = head.householdId && list.householdById.has(head.householdId) ? head.householdId : null;
-    const info = fundTrack.accountDetails(row);
+    const info = fundTrack.accountDetails(row, columns.groups);
     if (!householdId) {
       // A head with no address yet still needs a household for everyone else in their account.
       householdId = store.insert("households", { ...BLANK_HOUSEHOLD, createdAt: now, updatedAt: now }).id;
@@ -1780,14 +1818,17 @@ ipcMain.handle("fundtrack:commit", async () => {
 
   // 3. Everyone in each household.
   list = loadList();
-  const people = fundTrack.planPeople(data.individuals.rows, list.contacts, (groupUid) => headOf.get(groupUid) || null, fields, { sourceBatch: batch });
+  const people = fundTrack.planPeople(data.individuals.rows, list.contacts, (groupUid) => headOf.get(groupUid) || null, columns.individuals, fields, { sourceBatch: batch });
   store.insertMany("contacts", people.inserts.map((c) => ({ ...BLANK_CONTACT, ...c, createdAt: now, updatedAt: now })));
   const personPatches = new Map(people.updates.map((u) => [u.id, u.patch]));
   store.updateWhere("contacts", (c) => (personPatches.has(c.id) ? { ...personPatches.get(c.id), updatedAt: now } : null));
 
   // 4. The churches.
   list = loadList();
-  const orgs = fundTrack.planOrgs(data.orgs.rows, data.contacts.rows, data.addresses.rows, list.orgs, fields, { sourceBatch: batch });
+  const orgs = fundTrack.planOrgs(data.orgs.rows, data.contacts.rows, data.addresses.rows, list.orgs, columns.orgs, fields, {
+    sourceBatch: batch,
+    merged: listImport.mergedOrgs(store.list("retired"), list.orgs),
+  });
   store.insertMany("orgs", orgs.inserts.map((o) => ({ ...BLANK_ORG, ...o, createdAt: now, updatedAt: now })));
   const orgPatches = new Map(orgs.updates.map((u) => [u.id, u.patch]));
   store.updateWhere("orgs", (o) => (orgPatches.has(o.id) ? { ...orgPatches.get(o.id), updatedAt: now } : null));
@@ -1876,16 +1917,14 @@ ipcMain.handle("import:preview", async (event, source) => {
 });
 
 // A column headed with a field's name goes to that field ("Over 65" to the
-// Over 65 field, "SocialSecurityExempt" to Social Security exempt), unless
-// it's already going somewhere -- one of the built-in ones, say. The
-// membership software's other name for the exemption finds it too.
-const COLUMN_ALIASES = { hasssnexemption: "socialsecurityexempt" };
+// Over 65 field, "SocialSecurityExempt" to Social Security Exempt), unless
+// it's already going somewhere -- one of the built-in ones, say.
 function matchFields(headers, mapping, fields) {
   const out = { ...mapping };
   const used = new Set(Object.values(out));
   for (const header of headers) {
     if (out[header]) continue;
-    const key = COLUMN_ALIASES[fundTrack.labelKey(header)] || fundTrack.labelKey(header);
+    const key = fundTrack.labelKey(header);
     const field = fields.find((f) => fundTrack.labelKey(f.label) === key && !used.has(`field:${f.id}`));
     if (field) {
       out[header] = `field:${field.id}`;
@@ -1901,6 +1940,13 @@ function withoutSensitive(mapping) {
   return Object.fromEntries(Object.entries(mapping || {}).map(([header, target]) => [header, isSensitive(header) ? "" : target]));
 }
 
+// What an import plans against: the list, and the names of organizations
+// merged into others, so a merged one isn't brought back
+// (listImport.mergedOrgs).
+function importExisting(list) {
+  return { contacts: list.contacts, households: list.households, orgs: list.orgs, orgAliases: listImport.mergedOrgs(store.list("retired"), list.orgs).byName };
+}
+
 function planImport(source, mapping, options) {
   const { rows } = readImportSource(source);
   const list = loadList();
@@ -1908,7 +1954,7 @@ function planImport(source, mapping, options) {
     rows,
     withoutSensitive(mapping),
     options,
-    { contacts: list.contacts, households: list.households, orgs: list.orgs },
+    importExisting(list),
     list.publications,
     store.list("fields")
   );
@@ -2432,13 +2478,13 @@ ipcMain.handle("fields:remove", async (event, id) => {
 // card designs that used it are re-pointed to it; lists and cards of
 // households no longer have it. Done in that order so a stop part way
 // never loses a value: the people have theirs before the households' go.
-ipcMain.handle("fields:to-people", async (event, id) => {
+ipcMain.handle("fields:to-people", async (event, id, options = {}) => {
   const fields = store.list("fields");
   const field = fields.find((f) => f.id === id);
   if (!field) throw new Error("That field is no longer there.");
   if (field.appliesTo !== "household") throw new Error(`${field.label} isn't a household field.`);
   Fields.cleanDefinition({ ...field, appliesTo: "contact" }, fields, id); // a person field of the same name already?
-  const { people, stranded } = Fields.householdToPeople(id, store.list("households"), store.list("contacts"));
+  const { people, stranded } = Fields.householdToPeople(id, store.list("households"), store.list("contacts"), { onlyMembers: !!options.onlyMembers });
   const now = new Date().toISOString();
   store.updateWhere("contacts", (c) => (people.has(c.id) ? { fields: mergeFields(c.fields, { [id]: people.get(c.id) }), updatedAt: now } : null));
   const moved = store.update("fields", id, { appliesTo: "contact" });
@@ -2541,6 +2587,15 @@ ipcMain.handle("dialog:confirm", async (event, message, okLabel) => {
   });
   if (mainWindow) mainWindow.webContents.focus();
   return response === 0;
+});
+
+// A question with several answers: the index of the button chosen, or -1
+// for Cancel (always the last button).
+ipcMain.handle("dialog:choose", async (event, message, detail, buttons) => {
+  const all = [...(buttons || []), "Cancel"];
+  const { response } = await dialog.showMessageBox(mainWindow, { type: "question", buttons: all, defaultId: 0, cancelId: all.length - 1, noLink: true, message, detail: detail || undefined });
+  if (mainWindow) mainWindow.webContents.focus();
+  return response === all.length - 1 ? -1 : response;
 });
 
 ipcMain.handle("shell:open-path", async (event, filePath) => shell.openPath(filePath));

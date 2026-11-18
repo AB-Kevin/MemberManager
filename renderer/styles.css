@@ -737,6 +737,12 @@ kbd { font: 11px/1.4 inherit; padding: 0 5px; border: 1px solid var(--border-hai
 .fundtrack-panel table.ft-files { width: auto; margin: 6px 0 10px; }
 .fundtrack-panel table.ft-files th { text-align: left; font-weight: 500; padding-right: 14px; white-space: nowrap; }
 .fundtrack-panel table.ft-files select { max-width: 520px; }
+.fundtrack-panel .ft-remap { margin: 8px 0 12px; }
+.fundtrack-panel .ft-remap > summary { cursor: pointer; color: var(--accent-text); font-weight: 500; }
+.fundtrack-panel .ft-remap h3 { margin: 14px 0 2px; font-size: 14px; }
+.fundtrack-panel .ft-remap .mapping-table select { max-width: 280px; }
+.fundtrack-panel .ft-remap tr.ft-mapped td:first-child { font-weight: 600; }
+.fundtrack-panel .ft-reset { margin-left: 8px; font-size: 12px; }
 
 /* ---- Cards (pages/cards.js, cardPrint.js) ---- */
 .cards-top { gap: 10px; margin: 6px 0; }
