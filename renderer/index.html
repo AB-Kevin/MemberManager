@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https://tile.openstreetmap.org" />
 <title>MemberManager</title>
 <!-- Bundled, so the app looks right without an internet connection. -->
 <link rel="stylesheet" href="../node_modules/@fontsource/poppins/300.css" />
@@ -14,6 +14,8 @@
 <link rel="stylesheet" href="../node_modules/@fontsource/atkinson-hyperlegible/700.css" />
 <link rel="stylesheet" href="../node_modules/@fontsource/atkinson-hyperlegible/400-italic.css" />
 <link rel="stylesheet" href="../node_modules/@fontsource/atkinson-hyperlegible/700-italic.css" />
+<!-- The Map page's map (pages/map.js). -->
+<link rel="stylesheet" href="../node_modules/leaflet/dist/leaflet.css" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -31,6 +33,7 @@
         <button class="nav-btn" data-page="contacts">Members</button>
         <button class="nav-btn" data-page="lists">Lists</button>
         <button class="nav-btn" data-page="near">Near ZIP</button>
+        <button class="nav-btn" data-page="map">Map</button>
         <button class="nav-btn" data-page="cards">Cards</button>
         <button class="nav-btn" data-page="fields">Fields</button>
         <button class="nav-btn" data-page="duplicates">Duplicates <span class="nav-badge" id="duplicates-badge"></span></button>
@@ -56,6 +59,8 @@
   <script src="pages/find.js"></script>
   <script src="pages/lists.js"></script>
   <script src="pages/near.js"></script>
+  <script src="../node_modules/leaflet/dist/leaflet.js"></script>
+  <script src="pages/map.js"></script>
   <script src="pages/cards.js"></script>
   <script src="cardPrint.js"></script>
   <script src="pages/settings.js"></script>

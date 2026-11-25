@@ -6,6 +6,7 @@ A desktop app that keeps the office's member list in one place: everyone the off
 - **Members**: two editable spreadsheets, **People** and **Organizations**. Edits save as you go, and Ctrl+Z undoes them.
 - **Lists**: any list of people, households or churches, on any field and any conditions, to save as a spreadsheet, print, or keep for next time.
 - **Near ZIP**: how many members live within 10 to 100 miles of a ZIP code. Counts only, so it can be shared.
+- **Map**: a heat map of where members live, on a street map, by household or by person.
 - **Cards**: member cards for the card printer, designed on an SVG of the preprinted card, front and back.
 - **Fields**: the office's own fields, such as Committee, Over 65, Joined or District, for each person, each household or each organization. Add one in a few seconds from **Add field…** on the Members page, or from the **Fields** page.
 - **Import**: FundTrack's weekly exports (everyone in every household), a spreadsheet, new signups from the website's Gravity Forms signup form, or FormTracker's contacts. Any spreadsheet column can go into a field, or become a new one.
@@ -43,6 +44,12 @@ Pick **People**, **Households** or **Churches**, then add conditions on any fiel
 ## Near ZIP
 
 How many households and people live within 10, 25, 50, 75 and 100 miles of a ZIP code (up to 250), and a table of ZIP codes with their distance and counts, for active households or all of them, on any plan or one. Counts only: no names, phones or addresses, so its printout and spreadsheet can go to a hospital the office is contracting with. Distances are straight-line miles between ZIP code centre points (`lib/zip-locations.txt`, from the US Census Bureau's 2025 Gazetteer, public domain), not driving distance. A PO-box-only ZIP is placed at the nearest ZIP in its area and marked approximate.
+
+## Map
+
+A heat map of where members live, over an OpenStreetMap street map: **Households** or **People**, active households or all of them, on any plan or one. Each household is counted at its ZIP code's centre point, by the same rules as Near ZIP (`lib/nearZip.js`), so the map is as fine as ZIP codes and no finer. The colours compare the places in view, so zooming into one area shows how members spread within it. Zoomed in to about a county, each ZIP code gets a dot: point at it for its counts, or click it for **Members near** that ZIP on Near ZIP. **Zoom to members** frames where nearly all households are (the middle 98%), so a household or two far away doesn't shrink everyone else.
+
+The street map needs an internet connection; without one, the heat still shows on a blank background. Only the map's squares (tiles) are fetched, from `tile.openstreetmap.org`, under [its usage policy](https://operations.osmfoundation.org/policies/tiles/): the app names itself in each request and shows OpenStreetMap's credit. The heat and dots are drawn on this computer from the counts, so nothing about members is ever sent anywhere. Leaflet draws the map (`node_modules/leaflet`, BSD-2-Clause).
 
 ## Member cards
 

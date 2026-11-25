@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld("api", {
   nearReport: (options) => invoke("near:report", options),
   exportNear: (options) => invoke("near:export", options),
   printNear: (options) => invoke("near:print", options),
+  mapPoints: (options) => invoke("map:points", options),
   copyText: (text) => invoke("clipboard:copy", text),
 
   // Member cards.

@@ -776,3 +776,34 @@ kbd { font: 11px/1.4 inherit; padding: 0 5px; border: 1px solid var(--border-hai
 .card-print { margin: 8px 0 12px; }
 .card-print .row { gap: 10px; }
 @media (max-width: 1000px) { .cards-layout { grid-template-columns: 1fr; } }
+
+/* ---- Map (pages/map.js): a street map that fills the page, with the heat over it. ---- */
+.map-page { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.map-page h1 { margin-bottom: 8px; }
+.map-control { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: var(--tracking-label); }
+.map-wrap { position: relative; flex: 1; min-height: 320px; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); overflow: hidden; }
+#member-map { position: absolute; inset: 0; background: var(--surface-neutral); font-family: var(--font-sans); }
+.member-heat { opacity: 0.8; pointer-events: none; }
+.map-summary { margin: 8px 0 0; }
+.map-legend {
+  position: absolute; left: 10px; bottom: 10px; z-index: 500; width: 170px; padding: 6px 10px 4px;
+  background: color-mix(in srgb, var(--surface-card) 92%, transparent); border: 1px solid var(--border-hairline); border-radius: var(--radius-control);
+}
+.map-legend-bar { height: 8px; border-radius: 4px; }
+.map-legend-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.map-offline {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 500; padding: 6px 12px; font-size: 12px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface-card)); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); border-radius: var(--radius-control);
+}
+.map-popup { display: flex; flex-direction: column; gap: 4px; }
+.map-popup-title { font-weight: 600; color: var(--text-heading); }
+.map-popup .btn { margin-top: 6px; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip, .leaflet-tooltip { background: var(--surface-card); color: var(--text-body); font-family: var(--font-sans); }
+.leaflet-tooltip { border-color: var(--border-hairline); }
+.leaflet-container .leaflet-control-attribution { background: color-mix(in srgb, var(--surface-card) 80%, transparent); color: var(--text-muted); }
+.leaflet-container .leaflet-control-attribution a { color: var(--accent-text); border-bottom: none; }
+@media (prefers-color-scheme: dark) {
+  /* OpenStreetMap's tiles are drawn light; turned dark, they sit with the rest of the app. */
+  #member-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+  .leaflet-bar a { background: var(--surface-card); color: var(--text-body); border-color: var(--border-hairline); }
+}

@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, nativeTheme, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, nativeTheme, clipboard, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
@@ -88,7 +88,33 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  // A web link on a page (the Map's "OpenStreetMap" credit) opens in the
+  // browser rather than replacing the app in its window.
+  const external = (url) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  };
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    external(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith("file:")) return;
+    event.preventDefault();
+    external(url);
+  });
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+}
+
+// The Map page's street map comes from OpenStreetMap's tile server, whose
+// usage policy asks every app to name itself in its requests
+// (operations.osmfoundation.org/policies/tiles). Only the map squares in view
+// are asked for, and the browser cache keeps them as the server says to;
+// nothing about members goes with them.
+const TILE_HOST = "https://tile.openstreetmap.org/*";
+function tileHeaders() {
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: [TILE_HOST] }, (details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders, "User-Agent": `MemberManager/${app.getVersion()} (Anabaptist Brotherhood office app; Electron)` } });
+  });
 }
 
 // Lets a dev/test run point at a throwaway data directory instead of the
@@ -149,6 +175,7 @@ app.whenReady().then(() => {
     sendTeamStatus();
   });
   nativeTheme.themeSource = savedTheme();
+  tileHeaders();
   createWindow();
 
   app.on("activate", () => {
@@ -1344,6 +1371,17 @@ ipcMain.handle("near:print", async (event, options) => {
   if (!report) throw new Error("Enter a ZIP code first.");
   const bands = report.bands.map((b) => `within ${b.to} mi: ${b.households.toLocaleString()} households, ${b.people.toLocaleString()} people`).join(" · ");
   return printTable(`Members near ZIP ${o.zip}`, nearScope(o), NEAR_COLUMNS, nearRows(report), `${bands}. Straight-line miles between ZIP code centre points (US Census Bureau); counts only`);
+});
+
+// ---- Map ----
+// Households and people per ZIP code, for the Map page's heat map. Only these
+// counts go to the page; the map's tiles come from OpenStreetMap (see
+// tileHeaders), and nothing about members is ever sent anywhere.
+
+ipcMain.handle("map:points", async (event, options) => {
+  const { model } = currentModel();
+  const o = { plan: String(options?.plan || ""), inactive: !!options?.inactive };
+  return { options: o, plans: plansOf(model), ...nearZip.zipCounts(model, nearZip.loadZips(), o) };
 });
 
 // ---------------------------------------------------------------------------

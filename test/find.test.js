@@ -144,6 +144,33 @@ test("near a ZIP: rings, counts by ZIP, and miles as a list condition", () => {
   assert.ok(near.milesBetween([40.6, -77.7], [40.8, -81.9]) > 200);
 });
 
+test("the map: households and people per ZIP code, at each ZIP's centre", () => {
+  const zips = near.parseZips("17004,40.6,-77.7\n17009,40.6,-77.6\n44691,40.8,-81.9");
+  const m = buildModel(list(), TODAY);
+  const all = near.zipCounts(m, zips);
+  assert.deepEqual(
+    all.zips.map((z) => [z.zip, z.lat, z.lon, z.households, z.people, z.city, z.state]),
+    [
+      ["17004", 40.6, -77.7, 1, 2, "Belleville", "PA"],
+      ["44691", 40.8, -81.9, 1, 1, "Wooster", "OH"],
+    ],
+    "John's inactive household is left out"
+  );
+  assert.deepEqual([all.households, all.people, all.noZip, all.approx], [2, 3, 1, 0], "Old Typo's ZIP, 99999, has no point");
+  assert.equal(all.zips[0].name, undefined, "counts only, no names");
+
+  const withInactive = near.zipCounts(m, zips, { inactive: true });
+  assert.deepEqual([withInactive.zips[0].zip, withInactive.zips[0].households, withInactive.zips[0].people], ["17004", 2, 4]);
+
+  const onePlan = near.zipCounts(m, zips, { plan: "Workers' Aid Plan", inactive: true });
+  assert.deepEqual(onePlan.zips.map((z) => [z.zip, z.households, z.people]), [["17004", 1, 2]]);
+  assert.equal(onePlan.noZip, 0);
+
+  // A PO-box ZIP sits at its area's nearest ZIP, marked approximate.
+  const poBox = near.zipCounts(m, near.parseZips("17003,40.5,-77.8\n44691,40.8,-81.9"));
+  assert.deepEqual([poBox.zips.find((z) => z.zip === "17004").approx, poBox.approx], [true, 1]);
+});
+
 test("a PO-box ZIP borrows the nearest ZIP in its area, marked approximate", () => {
   const zips = near.parseZips("17004,40.6,-77.7\n17009,40.6,-77.6");
   assert.deepEqual(near.zipPoint(zips, "17005"), { pt: [40.6, -77.7], approx: true, via: "17004" });

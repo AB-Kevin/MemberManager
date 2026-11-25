@@ -90,7 +90,7 @@ let currentPage = null;
 // arrive; one with a form (Import, Settings) is left alone. A
 // page can set window.__refreshPage to refresh itself more gently -- the
 // member list keeps its scroll position and selection.
-const LIVE_PAGES = new Set(["find", "contacts", "lists", "near", "duplicates", "fields"]);
+const LIVE_PAGES = new Set(["find", "contacts", "lists", "near", "map", "duplicates", "fields"]);
 let refreshWanted = false;
 
 function refreshPage() {
